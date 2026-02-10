@@ -282,21 +282,19 @@ async def run():
 
             # --- 2B. TARGET LOST:recognition ---
             else:
-                # 1. Reset immediato della memoria Integrale
-                # Se non vedi il target, non devi spingere verso una direzione vecchia!
+                # 1. Reset of I
                 integ_x, integ_y = 0.0, 0.0
                 
                 time_since_loss = time.time() - last_seen_time
                 
                 # Fase 1: Wait (Anti-Glitch) - 1.5 secondi
-                # Aspettiamo un attimo prima di impazzire, magari è solo un frame perso
                 if time_since_loss < 1.5:
                     cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
                 
                 # Fase 2: Search Mode (Spirale + Risalita)
                 else:
                     if not search_active:
-                        print(f">>> PERSO IN ATTERRAGGIO! RISALITA TATTICA <<<")
+                        print(f">>> LOST IN LANDING, INITIATING SEARCH <<<")
                         search_active = True
                         search_start_time = time.time()
                         search_leg_index = 0
@@ -320,14 +318,13 @@ async def run():
                     elif direction == 3: cmd_x, cmd_y = 0.0, -spd
                     
                     # --- LA MODIFICA CRUCIALE: RISALITA ---
-                    # Se perdi il target in basso (< 10m), DEVI salire per allargare il FOV.
-                    # Se non metti questo, farai la spirale a 2m da terra e non lo troverai mai.
-                    SEARCH_CEILING = 10.0
+                    # If we lost target, we might be too low to see it again. To avoid getting stuck in a blind spot, we will command a slow ascent until we reach a certain ceiling where we can search effectively.
+                    SEARCH_CEILING = 3.0
                     
                     if current_alt < SEARCH_CEILING:
-                        cmd_z = -0.8 # Risali deciso (negativo è SU)
+                        cmd_z = -0.8 # Go up to regain sight
                     else:
-                        cmd_z = 0.0  # Mantieni quota se sei già alto
+                        cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
         if current_alt < 1.4 and cruise_altitude_reached:
