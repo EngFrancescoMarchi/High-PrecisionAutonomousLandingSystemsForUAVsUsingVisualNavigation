@@ -1,0 +1,53 @@
+File dei richiami:
+
+Aggiornamenti periodici:
+sudo apt update && sudo apt upgrade -y
+# Installa i driver Nvidia consigliati (fondamentale per Gazebo)
+sudo ubuntu-drivers autoinstall
+
+Ambiente Python:
+sudo apt install python3-venv -y
+cd ~
+python3 -m venv tesi_env
+# Attiva l'ambiente (fallo ogni volta che lavori alla tesi)
+source tesi_env/bin/activate
+
+# Installa le librerie necessarie nell'ambiente protetto
+pip install mavsdk opencv-contrib-python numpy
+
+Drone su Gazebo:
+
+cd ~/PX4-Autopilot
+make px4_sitl gz_x500_vision
+Windy:
+
+PX4_GZ_WORLD=world make px4_sitl gz_x500_vision
+
+QControl:
+./QGroundControl.AppImage
+
+Target:
+
+gz service -s /world/default/create --reqtype gz.msgs.EntityFactory --reptype gz.msgs.Boolean --timeout 1000 --req 'sdf_filename: "/home/france/Desktop/aruco_marker.sdf", name: "aruco_target", pose: {position: {x: 4.5, y: 4.0, z: 0.01}, orientation: {x: 0.707, y: 0, z: 0, w: 0.707}}'
+
+Cervello:
+cd ~/Desktop/Tesi
+python3 landing_controller.py
+
+Modificare modello drone:
+
+gedit ~/PX4-Autopilot/Tools/simulation/gz/models/x500_vision/model.sdf
+
+gz service -s /world/default/create \
+--reqtype gz.msgs.EntityFactory \
+--reptype gz.msgs.Boolean \
+--req 'sdf_filename: "/home/france/PX4-Autopilot/Tools/simulation/gz/models/moving_platform/gva_platform.sdf", name: "gva_platform", pose: {position: {x: 3.5, y: -4.0, z: 0}}'
+
+gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0.28, y: 0.28, z: 0.0}"
+gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: -0.28, y: -0.28, z: 0.0}"
+
+Per il vento:
+
+gz service -s /world/default/model/x500_vision_0/link/base_link/apply_link_force \
+--reqtype gz.msgs.EntityWrench \
+--req "entity: {name: 'x500_vision_0', type: MODEL}, wrench: {force: {x: 5, y: 3, z: 0}}"
