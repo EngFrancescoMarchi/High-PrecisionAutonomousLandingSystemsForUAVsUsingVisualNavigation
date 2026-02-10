@@ -15,7 +15,7 @@ except ImportError:
     print("⚠️ ERRORE CRITICO: Librerie Gazebo non trovate. Fai 'source' prima di lanciare!")
     sys.exit(1)
 
-FREQ = 30.0             # Hz Loop Controllo
+FREQ = 30.0             
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 10.0   # Quota di crociera (metri)
 ALIGN_THRESHOLD = 80    # Pixel tolleranza per iniziare discesa
