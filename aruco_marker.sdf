@@ -16,7 +16,7 @@
           <specular>0 0 0 1</specular>
           <pbr>
             <metal>
-              <albedo_map>/home/france/Desktop/Tesi/nested_paper_target.png</albedo_map>
+              <albedo_map>/home/marchi/High-PrecisionAutonomousLandingSystemsForUAVsUsingVisualNavigation/Target/nested_paper_target.png</albedo_map>
             </metal>
           </pbr>
         </material>

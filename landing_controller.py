@@ -12,7 +12,7 @@ try:
     from gz.transport13 import Node
     from gz.msgs10.image_pb2 import Image
 except ImportError:
-    print("⚠️ ERRORE CRITICO: Librerie Gazebo non trovate. Fai 'source' prima di lanciare!")
+    print("ERRORE CRITICO")
     sys.exit(1)
 
 FREQ = 30.0             #upadating at 30Hz for better performance with HD stream
@@ -219,7 +219,7 @@ async def run():
                 # Gain Scheduling
                 if current_alt < 2.0:
                     dampener = 0.15
-                    max_speed_xy = 0.4 
+                    max_speed_xy = 0.3 
                 else:
                     dampener = 1.0
                     max_speed_xy = 1.1
@@ -241,7 +241,7 @@ async def run():
                     
                     pass
                 # 3. Feed-Forward Gain (Stima Velocità)
-                ff_gain = 0.003 
+                ff_gain = 0.0035 
 
                 # 4. Total PID
                 # Asse Y (Roll)
@@ -290,7 +290,8 @@ async def run():
                 # Fase 1: Wait (Anti-Glitch) - 1.5 secondi
                 if time_since_loss < 1.5:
                     cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
-                
+                    if time_since_loss > 1.0: # Print solo dopo 1 secondo per non spammare
+                        print(f"WAITING... {time_since_loss:.2f}")
                 # Fase 2: Search Mode (Spirale + Risalita)
                 else:
                     if not search_active:
@@ -319,10 +320,10 @@ async def run():
                     
                     # --- LA MODIFICA CRUCIALE: RISALITA ---
                     # If we lost target, we might be too low to see it again. To avoid getting stuck in a blind spot, we will command a slow ascent until we reach a certain ceiling where we can search effectively.
-                    SEARCH_CEILING = 3.0
+                    SEARCH_CEILING = 3.5
                     
                     if current_alt < SEARCH_CEILING:
-                        cmd_z = -0.8 # Go up to regain sight
+                        cmd_z = -0.6 # Go up to regain sight
                     else:
                         cmd_z = 0.0  # Maintain altitude if already high
 

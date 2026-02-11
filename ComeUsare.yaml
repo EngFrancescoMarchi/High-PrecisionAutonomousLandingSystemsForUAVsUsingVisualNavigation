@@ -32,6 +32,7 @@ gz service -s /world/default/create --reqtype gz.msgs.EntityFactory --reptype gz
 
 Cervello:
 cd ~/Desktop/Tesi
+cd ~/High-PrecisionAutonomousLandingSystemsForUAVsUsingVisualNavigation
 python3 landing_controller.py
 
 Modificare modello drone:
@@ -42,6 +43,13 @@ gz service -s /world/default/create \
 --reqtype gz.msgs.EntityFactory \
 --reptype gz.msgs.Boolean \
 --req 'sdf_filename: "/home/france/PX4-Autopilot/Tools/simulation/gz/models/moving_platform/gva_platform.sdf", name: "gva_platform", pose: {position: {x: 3.5, y: -4.0, z: 0}}'
+
+LABORATORIO:
+
+gz service -s /world/default/create \
+--reqtype gz.msgs.EntityFactory \
+--reptype gz.msgs.Boolean \
+--req 'sdf_filename: "/home/marchi/PX4-Autopilot/Tools/simulation/gz/models/moving_platform/gva_platform.sdf", name: "gva_platform", pose: {position: {x: 3.5, y: -4.0, z: 0}}'
 
 gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0.28, y: 0.28, z: 0.0}"
 gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: -0.28, y: -0.28, z: 0.0}"
