@@ -377,21 +377,17 @@ if __name__ == "__main__":
     try:
         loop.run_until_complete(run())
     except KeyboardInterrupt:
-        print("\n!!! Interrotto da France (utente) !!!")
+        print("\n!!! Aborted by User !!!")
     except Exception as e:
         print(f"Errore imprevisto: {e}")
     finally:
         # Ora controlliamo se log_data ha effettivamente dei dati prima di plottare
         if 'time' in log_data and len(log_data['time']) > 0:
-            print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
+            print(f"Data save({len(log_data['time'])} points)...")
             plot_results(log_data)
         else:
             print("Nessun dato registrato da plottare.")
             
-        print("Pulizia e chiusura...")
+        print("Killing...")
         # Questo forza la chiusura dei thread appesi di MAVSDK/OpenCV
-        try:
-            # Opzionale: pulizia esplicita se necessario
-            pass 
-        except:
-            pass
+        sys.exit(0)
