@@ -233,7 +233,7 @@ async def run():
                 # Gain Scheduling
                 if current_alt < 2.0:
                     dampener = 0.15
-                    max_speed_xy = 0.25 
+                    max_speed_xy = 0.3 
                 else:
                     dampener = 1.0
                     max_speed_xy = 1.1
