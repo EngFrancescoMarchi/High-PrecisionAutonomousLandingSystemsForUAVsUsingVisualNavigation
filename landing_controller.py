@@ -182,8 +182,8 @@ async def run():
         est_y, est_vy = est_state[2][0], est_state[3][0]
         
         # --- Parallax Correction ---
-        CAMERA_OFFSET_X = 0.10   # Camera forward of COM 
-        CAMERA_OFFSET_Z = 0.05   # Camera lower than COM 
+        CAMERA_OFFSET_X = -0.05   # Camera forward of COM 
+        CAMERA_OFFSET_Z = 0.02   # Camera lower than COM 
         FOCAL_LENGTH    = 1100.0 # Pixel ( 720p/1080p. Se 640x480 usa ~550)
 
         # 1. Calculo Altitudine Effettiva della Camera
@@ -195,7 +195,8 @@ async def run():
         
         # 3. Application
         #If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
-        est_y = est_y - expected_pixel_offset
+        est_x = est_x + expected_pixel_offset
+        est_y = est_y  # No correction needed on Y for forward offset
         # --- B. CONTROLLO ---
         cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
         

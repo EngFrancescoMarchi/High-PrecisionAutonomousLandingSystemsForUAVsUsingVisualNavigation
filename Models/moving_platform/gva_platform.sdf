@@ -15,11 +15,20 @@
           <iyy>10000</iyy><iyz>0</iyz><izz>10000</izz>
         </inertia>
       </inertial>
+      <visual name="orange_base">
+          <geometry>
+            <box><size>0.74 0.75 0.04</size></box>
+          </geometry>
+          <material>
+            <ambient>1.0 0.4 0.0 1.0</ambient> 
+            <diffuse>1.0 0.4 0.0 1.0</diffuse>
+          </material>
+      </visual>
 
       <visual name="platform_visual">
         <geometry>
           <box>
-            <size>0.7 0.7 0.05</size>
+            <size>0.60 0.60 0.05</size>
           </box>
         </geometry>
         <material>
@@ -37,7 +46,7 @@
       <collision name="platform_collision">
         <geometry>
           <box>
-            <size>0.7 0.7 0.05</size>
+            <size>0.74 0.74 0.05</size>
           </box>
         </geometry>
         <surface>
