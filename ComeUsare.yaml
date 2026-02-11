@@ -56,6 +56,8 @@ gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: -0.28, 
 
 Per il vento:
 
-gz service -s /world/default/model/x500_vision_0/link/base_link/apply_link_force \
+gz service -s /world/default/model/x500_vision_0/link/base_link/apply_wrench \
 --reqtype gz.msgs.EntityWrench \
---req "entity: {name: 'x500_vision_0', type: MODEL}, wrench: {force: {x: 5, y: 3, z: 0}}"
+--reptype gz.msgs.Boolean \
+--timeout 1000 \
+--req 'entity: {name: "x500_vision_0", type: MODEL}, wrench: {force: {x: 2.5, y: 1.0, z: 0.0}, torque: {x: 0.05, y: 0.1, z: 0.05}}'

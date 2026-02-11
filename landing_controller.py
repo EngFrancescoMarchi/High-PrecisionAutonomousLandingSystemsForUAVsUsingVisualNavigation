@@ -7,6 +7,8 @@ from mavsdk import System
 from gz.msgs10.entity_factory_pb2 import EntityFactory
 from gz.msgs10.pose_pb2 import Pose
 from mavsdk.offboard import (OffboardError, VelocityBodyYawspeed, PositionNedYaw)
+import matplotlib.pyplot as plt
+import pandas as pd # Se vuoi salvare in Excel/CSV
 
 try:
     from gz.transport13 import Node
@@ -18,7 +20,7 @@ except ImportError:
 FREQ = 30.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 10.0   # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 80    # Pixel tolerance to start descent
+ALIGN_THRESHOLD = 75    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 1280, 720
@@ -136,8 +138,8 @@ async def run():
     last_seen_time = time.time()
     search_start_time = 0
     search_leg_index = 0
-    search_leg_duration = 1.5 
-    base_search_speed = 1.0  
+    search_leg_duration = 2.0 
+    base_search_speed = 1.5  
     
     # --- INT ---
     integ_x = 0.0
@@ -156,7 +158,17 @@ async def run():
     except OffboardError: return
 
     next_wake_time = time.time() + DT
-
+    # --- DATA LOGGING SETUP ---
+    log_data = {
+        'time': [],
+        'alt': [],
+        'pos_x_est': [],  # Posizione stimata dal Kalman
+        'pos_y_est': [],
+        'vel_x_cmd': [],  # Comando inviato
+        'vel_y_cmd': [],
+        'target_visible': [] # 1 se visto, 0 se perso
+    }
+    start_log_time = time.time()
     while True:
     
         measurement, is_new = shared_buffer.read()
@@ -267,6 +279,15 @@ async def run():
                 current_align_thresh = ALIGN_THRESHOLD if current_alt > 2.5 else (ALIGN_THRESHOLD * 2.5)
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                 
+                # --- LOGGING (Dentro il While) ---
+                current_log_time = time.time() - start_log_time
+                log_data['time'].append(current_log_time)
+                log_data['alt'].append(current_alt)
+                log_data['pos_x_est'].append(est_x) # O l'errore raw se preferisci
+                log_data['pos_y_est'].append(est_y)
+                log_data['vel_x_cmd'].append(cmd_x)
+                log_data['vel_y_cmd'].append(cmd_y)
+                log_data['target_visible'].append(1 if target_visible else 0)
                 if is_aligned:
                     # BLIND DROP CHECK (< 1.2m)
                     #if current_alt < 1.50:
@@ -328,7 +349,7 @@ async def run():
                         cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 1.4 and cruise_altitude_reached:
+        if current_alt < 1.37 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
              try: await drone.offboard.stop()
@@ -345,4 +366,12 @@ async def run():
         next_wake_time += DT
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(run())
+    except KeyboardInterrupt:
+        print("Interrotto dall'utente")
+    finally:
+        # SE HAI USATO UNA VARIABILE GLOBALE PER log_data:
+        plot_results(log_data) 
+        print("Pulizia e chiusura...")
