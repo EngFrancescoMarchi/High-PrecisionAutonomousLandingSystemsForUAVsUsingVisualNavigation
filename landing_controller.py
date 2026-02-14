@@ -21,7 +21,7 @@ except ImportError:
 FREQ = 30.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 10.0   # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 75    # Pixel tolerance to start descent
+ALIGN_THRESHOLD = 80    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 1280, 720
@@ -83,12 +83,12 @@ def vision_callback(msg):
         
         if ids is not None:
             ids_list = ids.flatten().tolist()
-            if 0 in ids_list:
-                idx = ids_list.index(0)
-                target_id = 0
-            elif 4 in ids_list:
+            if 4 in ids_list:
                 idx = ids_list.index(4)
-                target_id = 4
+                
+            elif 0 in ids_list:
+                idx = ids_list.index(0)
+                
             else:
                 idx = -1
 
@@ -126,7 +126,7 @@ async def run():
     kf = LandingKalmanFilter(DT)
     asyncio.create_task(telemetry_loop(drone))
 
-    # PID Gains (40Hz + HD)
+    # PID Gains (30Hz + HD)
     KP_X, KD_X = 0.0005, 0.002 
     KP_Y, KD_Y = 0.0005, 0.002
     KI = 0.00035   # <--- NUOVO: Integrale Gain
@@ -139,7 +139,7 @@ async def run():
     search_start_time = 0
     search_leg_index = 0
     search_leg_duration = 2.0 
-    base_search_speed = 1.5  
+    base_search_speed = 1.2  
     
     # --- INT ---
     integ_x = 0.0
@@ -177,6 +177,7 @@ async def run():
         est_state = kf.predict() 
         if is_new and measurement is not None:
             kf.update(measurement)
+            last_seen_time = time.time()
         
         est_x, est_vx = est_state[0][0], est_state[1][0]
         est_y, est_vy = est_state[2][0], est_state[3][0]
@@ -216,7 +217,7 @@ async def run():
         # STATO 2: descent + search
         else:
             # Check se abbiamo il target ORA
-            target_visible = (measurement is not None)
+            target_visible = (time.time() - last_seen_time) < 1.5
 
             # --- 2A. Target Tracking ---
             if target_visible:
@@ -227,12 +228,11 @@ async def run():
                     search_leg_index = 0
                     # Reset Integral on finding to avoid jerks
                     integ_x, integ_y = 0.0, 0.0
-                last_seen_time = time.time()
             #Damper is the scale of the calculated force, 
             # in this case we will use 40% of calculated, avoid shaking
                 # Gain Scheduling
-                if current_alt < 0.7:
-                    dampener = 0.15
+                if current_alt < 0.65:
+                    dampener = 0.1
                     max_speed_xy = 0.3 
                 else:
                     dampener = 1.0
@@ -255,10 +255,10 @@ async def run():
                     
                     pass
                 # 3. Feed-Forward Gain (Stima Velocità)
-                if abs(est_x) < 0.09 or abs(est_y) < 0.09:
+                if abs(est_x) < 40 or abs(est_y) < 40:
                     ff_gain = 0.0  # Se siamo molto vicini, disabiliti
-                if current_alt < 0.8:
-                    ff_gain = 0.0005  # Guadagno più conservativo in discesa
+                elif current_alt < 1.5:
+                    ff_gain = 0.0015  # Guadagno più conservativo in discesa
                 else:
                     ff_gain = 0.0035 
 
@@ -283,7 +283,7 @@ async def run():
                 cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
 
                 # Gestione Discesa
-                current_align_thresh = ALIGN_THRESHOLD if current_alt > 1.2 else (ALIGN_THRESHOLD * 2.5)
+                current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.85 else (ALIGN_THRESHOLD * 3)
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                 
                 # --- LOGGING (Dentro il While) ---
@@ -296,13 +296,7 @@ async def run():
                 log_data['vel_y_cmd'].append(cmd_y)
                 log_data['target_visible'].append(1 if target_visible else 0)
                 if is_aligned:
-                    # BLIND DROP CHECK (< 1.2m)
-                    #if current_alt < 1.50:
-                    #   cmd_z = 0.1 # Drop deciso
-                      #  integ_x, integ_y = 0.0, 0.0 
-                       # cmd_x, cmd_y = 0.0, 0.0 # Ignora PID, vai giù dritto
-                    #else:
-                    final_descent_speed = 0.15 if current_alt < 0.9 else 0.35
+                    final_descent_speed = 0.13 if current_alt < 0.85 else 0.30
                     cmd_z = final_descent_speed
                 else:
                     # Hovering correttivo
@@ -316,9 +310,9 @@ async def run():
                 time_since_loss = time.time() - last_seen_time
                 
                 # Fase 1: Wait (Anti-Glitch) - 1.5 secondi
-                if time_since_loss < 1.5:
+                if time_since_loss < 2.5:
                     cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
-                    if time_since_loss > 1.0: # Print solo dopo 1 secondo per non spammare
+                    if time_since_loss > 1.5: # Print solo dopo 1 secondo per non spammare
                         print(f"WAITING... {time_since_loss:.2f}")
                 # Fase 2: Search Mode (Spirale + Risalita)
                 else:
@@ -327,7 +321,7 @@ async def run():
                         search_active = True
                         search_start_time = time.time()
                         search_leg_index = 0
-                        search_leg_duration = 1.0 # Spirale veloce
+                        search_leg_duration = 1.5 # Spirale veloce
                     
                     dt_search = time.time() - search_start_time
                     
@@ -348,15 +342,15 @@ async def run():
                     
                     # --- LA MODIFICA CRUCIALE: RISALITA ---
                     # If we lost target, we might be too low to see it again. To avoid getting stuck in a blind spot, we will command a slow ascent until we reach a certain ceiling where we can search effectively.
-                    SEARCH_CEILING = 3.5
+                    SEARCH_CEILING = 5.0
                     
                     if current_alt < SEARCH_CEILING:
-                        cmd_z = -0.6 # Go up to regain sight
+                        cmd_z = -1.0 # Go up to regain sight
                     else:
                         cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.37 and cruise_altitude_reached:
+        if current_alt < 0.24 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
              try: await drone.offboard.stop()
@@ -390,8 +384,3 @@ if __name__ == "__main__":
             
         print("Pulizia e chiusura...")
         # Questo forza la chiusura dei thread appesi di MAVSDK/OpenCV
-        try:
-            # Opzionale: pulizia esplicita se necessario
-            pass 
-        except:
-            pass

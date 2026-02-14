@@ -52,7 +52,8 @@ gz service -s /world/default/create \
 --req 'sdf_filename: "/home/marchi/High-PrecisionAutonomousLandingSystemsForUAVsUsingVisualNavigation/Models/moving_platform/gva_platform.sdf", name: "gva_platform", pose: {position: {x: 0, y: 0, z: 0}}'
 
 gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0.28, y: 0.28, z: 0.0}"
-gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: -0.28, y: -0.28, z: 0.0}"
+gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: -0.14, y: 0.14, z: 0.0}"
+gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0, y: 0, z: 0.0}"
 
 Per il vento:
 
