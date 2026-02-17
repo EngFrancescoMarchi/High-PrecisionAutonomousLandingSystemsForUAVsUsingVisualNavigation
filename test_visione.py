@@ -2,94 +2,80 @@ import cv2
 import numpy as np
 import time
 
-# Impostazioni Camera (Le stesse che pretendi di usare in volo)
+# Impostazioni Camera
 CAM_W, CAM_H = 1280, 720
 CENTER_X, CENTER_Y = CAM_W // 2, CAM_H // 2
 
 def main():
-    print("Inizializzazione telecamera fisica USB...")
-    # '0' è l'indice standard per la prima webcam USB collegata
+    print("Inizializzazione telecamera fisica USB in modalità HEADLESS...")
     cap = cv2.VideoCapture(0)
     
-    # Forza la risoluzione per testare il vero carico sul Jetson
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
     if not cap.isOpened():
-        print("ERRORE CRITICO: Impossibile aprire la telecamera. Hai attaccato il cavo USB, France?")
+        print("ERRORE CRITICO: Impossibile aprire la telecamera. Cavo USB collegato?")
         return
 
-    # Dizionario ArUco (usiamo esattamente il 4x4_50 del tuo codice originale)
+    # --- NUOVA SINTASSI OPENCV 4.7+ ---
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-    
-    # Variabili per calcolo FPS reale
+    parameters = cv2.aruco.DetectorParameters()
+    detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
+    # ----------------------------------
+
     prev_time = time.time()
 
     print(f"--- TEST VISIONE AVVIATO ({CAM_W}x{CAM_H}) ---")
-    print("Premi 'q' sulla finestra video per uscire o Ctrl+C nel terminale.")
+    print("Premi Ctrl+C nel terminale per fermare lo script.")
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Frame perso dal buffer hardware! Controlla la connessione USB.")
-            time.sleep(0.1)
-            continue
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(0.1)
+                continue
 
-        # Calcolo FPS effettivo (vitale per capire se il Jetson sta soffocando)
-        current_time = time.time()
-        fps = 1 / (current_time - prev_time) if (current_time - prev_time) > 0 else 0
-        prev_time = current_time
+            current_time = time.time()
+            fps = 1 / (current_time - prev_time) if (current_time - prev_time) > 0 else 0
+            prev_time = current_time
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        corners, ids, _ = cv2.aruco.detectMarkers(gray, aruco_dict)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            # --- NUOVA SINTASSI RILEVAMENTO ---
+            corners, ids, _ = detector.detectMarkers(gray)
+            # ----------------------------------
 
-        target_locked = False
-        target_id = -1
-        cx, cy = 0, 0
+            target_locked = False
+            target_id = -1
+            cx, cy = 0, 0
 
-        if ids is not None:
-            ids_list = ids.flatten().tolist()
-            idx = -1
-            if 4 in ids_list:
-                idx = ids_list.index(4)
-                target_id = 4
-            elif 0 in ids_list:
-                idx = ids_list.index(0)
-                target_id = 0
-
-            if idx != -1:
-                c = corners[idx][0]
-                cx = int(np.mean(c[:, 0])) - CENTER_X
-                cy = int(np.mean(c[:, 1])) - CENTER_Y
-                target_locked = True
+            if ids is not None:
+                ids_list = ids.flatten().tolist()
+                idx = -1
                 
-                # Disegna il centro e i bordi per darti un feedback visivo
-                cv2.aruco.drawDetectedMarkers(frame, corners, ids)
-                cv2.circle(frame, (cx + CENTER_X, cy + CENTER_Y), 5, (0, 255, 0), -1)
+                # Cerca prima l'ID 0, poi l'ID 4
+                if 0 in ids_list:
+                    idx = ids_list.index(0)
+                    target_id = 0
+                elif 4 in ids_list:
+                    idx = ids_list.index(4)
+                    target_id = 4
 
-        # Stampa i risultati a terminale
-        status = f"LOCKED (ID:{target_id}) | cx:{cx:4d} cy:{cy:4d}" if target_locked else "LOST"
-        print(f"FPS Reali: {fps:5.1f} | {status}")
+                if idx != -1:
+                    c = corners[idx][0]
+                    cx = int(np.mean(c[:, 0])) - CENTER_X
+                    cy = int(np.mean(c[:, 1])) - CENTER_Y
+                    target_locked = True
 
-        # Mostra a schermo il video
-        cv2.putText(frame, f"FPS: {fps:.1f} | {status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        
-        try:
-            cv2.imshow("Jetson Vision Test", frame)
-        except Exception as e:
-            # Cattura l'errore se provi ad aprire una finestra grafica via SSH senza X11
-            print(f"Avviso: Impossibile mostrare la finestra video (sei in SSH senza GUI?). Errore: {e}")
-            pass
+            status = f"LOCKED (ID:{target_id}) | cx:{cx:4d} cy:{cy:4d}" if target_locked else "LOST"
+            print(f"FPS: {fps:5.1f} | {status}")
 
-        # Uscita pulita
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    # Pulizia rigorosa
-    cap.release()
-    cv2.destroyAllWindows()
-    print("Test concluso.")
+    except KeyboardInterrupt:
+        print("\nTest interrotto manualmente da France.")
+    finally:
+        cap.release()
+        print("Telecamera spenta. Chiusura pulita.")
 
 if __name__ == "__main__":
     main()
