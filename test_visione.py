@@ -3,7 +3,7 @@ import numpy as np
 import time
 
 # Impostazioni Camera
-CAM_W, CAM_H = 1280, 720
+CAM_W, CAM_H = 640, 480
 CENTER_X, CENTER_Y = CAM_W // 2, CAM_H // 2
 
 def main():
