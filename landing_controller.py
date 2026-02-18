@@ -20,12 +20,11 @@ except ImportError:
 
 FREQ = 25.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
-TARGET_ALTITUDE = 5   # Target altitude for initial hover before descent (meters)
+TARGET_ALTITUDE = 5.5   # Target altitude for initial hover before descent (meters)
 ALIGN_THRESHOLD = 60    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
-CENTER_X, CENTER_Y = CAM_W // 2, CAM_H // 2
 aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 parameters = cv2.aruco.DetectorParameters()
 detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
@@ -105,8 +104,32 @@ def vision_callback(msg):
                 c = corners[idx][0]
                 dyn_center_x = msg.width // 2
                 dyn_center_y = msg.height // 2
-                cx = int(np.mean(c[:, 0])) -dyn_center_x
-                cy = int(np.mean(c[:, 1])) - dyn_center_y
+                
+                # --- CALCOLO VERO CENTRO PROIETTIVO (Intersezione Diagonali) ---
+                p0, p1, p2, p3 = c[0], c[1], c[2], c[3]
+                
+                # Retta 1 (Diagonale da p0 a p2)
+                A1 = p2[1] - p0[1]
+                B1 = p0[0] - p2[0]
+                C1 = A1 * p0[0] + B1 * p0[1]
+                
+                # Retta 2 (Diagonale da p1 a p3)
+                A2 = p3[1] - p1[1]
+                B2 = p1[0] - p3[0]
+                C2 = A2 * p1[0] + B2 * p1[1]
+                
+                det = A1 * B2 - A2 * B1
+                
+                if det != 0:
+                    true_cx = (B2 * C1 - B1 * C2) / det
+                    true_cy = (A1 * C2 - A2 * C1) / det
+                else:
+                    # Fallback di emergenza
+                    true_cx, true_cy = np.mean(c[:, 0]), np.mean(c[:, 1])
+                
+                cx = int(true_cx) - dyn_center_x
+                cy = int(true_cy) - dyn_center_y
+                
                 cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
         shared_buffer.write(cx, cy, frame_display) 
     except Exception:
@@ -136,7 +159,7 @@ async def run():
 
     # PID Gains (30Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
-    KP_Y, KD_Y = 0.001, 0.003
+    KP_Y, KD_Y = 0.0012, 0.003
     KI = 0.00035   # <--- NUOVO: Integrale Gain
     
     cruise_altitude_reached = False 
@@ -241,7 +264,7 @@ async def run():
             #Damper is the scale of the calculated force, 
             # in this case we will use 40% of calculated, avoid shaking
                 # Gain Scheduling
-                if current_alt < 0.75:
+                if current_alt < 0.65:
                     dampener = 0.35
                     max_speed_xy = 0.4 
                 else:
@@ -267,8 +290,8 @@ async def run():
                 # 3. Feed-Forward Gain (Stima Velocità)
                 if abs(est_x) < 25 or abs(est_y) < 25:
                     ff_gain = 0.0  # Se siamo molto vicini, disabiliti
-                elif current_alt < 1.05:
-                    ff_gain = 0.0015  # Guadagno più conservativo in discesa
+                elif current_alt < 1.15:
+                    ff_gain = 0.0020  # Guadagno più conservativo in discesa
                 else:
                     ff_gain = 0.0035 
 
@@ -360,7 +383,7 @@ async def run():
                         cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.24 and cruise_altitude_reached:
+        if current_alt < 0.23 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
              try: await drone.offboard.stop()

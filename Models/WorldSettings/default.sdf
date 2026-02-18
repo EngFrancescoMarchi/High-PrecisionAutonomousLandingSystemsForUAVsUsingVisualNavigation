@@ -118,7 +118,7 @@
 
         <visual name="platform_visual">
           <geometry>
-            <box><size>0.55 0.55 0.02</size></box>
+            <box><size>0.54 0.52 0.02</size></box>
           </geometry>
           <material>
             <ambient>1 1 1 1</ambient>
