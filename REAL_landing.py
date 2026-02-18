@@ -78,18 +78,16 @@ class LandingKalmanFilter:
 # --- VISION CALLBACK ---
 shared_buffer = SharedBuffer()
 
-# --- IL NUOVO CERVELLO OTTICO (THREAD SEPARATO) ---
-# --- IL NUOVO CERVELLO OTTICO (THREAD SEPARATO) ---
+# --- THE NEW OPTICAL BRAIN (SEPARATE THREAD) ---
 class CameraThread(threading.Thread):
     def __init__(self, buffer):
         super().__init__()
         self.buffer = buffer
-        self.daemon = True # Il thread muore quando premi Ctrl+C
+        self.daemon = True # The thread dies when you press Ctrl+C
         self.running = True
 
     def run(self):
-        print("[Visione] Inizializzazione telecamera fisica...")
-        # NOTA: 0 è per webcam USB. Se usi la PiCamera CSI serve la stringa GStreamer!
+        print("[Vision] Physical camera initialization...")
         cap = cv2.VideoCapture(0, cv2.CAP_V4L2) 
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
@@ -97,14 +95,14 @@ class CameraThread(threading.Thread):
         cap.set(cv2.CAP_PROP_FPS, FREQ)
 
         if not cap.isOpened():
-            print("[Visione] ERRORE CRITICO: Telecamera non trovata!")
+            print("[Vision] CRITICAL ERROR: Camera not found!")
             self.running = False
             return
 
-        print(f"[Visione] Webcam USB Pronta: {CAM_W}x{CAM_H} @ {FREQ}fps")
+        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
 
         while self.running:
-            ret, frame = cap.read() # Questa riga BLOCCA, ma essendo in un thread, MAVSDK è salvo!
+            ret, frame = cap.read() # This line BLOCKS, but since it's in a thread, MAVSDK is safe!
             if not ret or frame is None:
                 continue
             
@@ -116,8 +114,6 @@ class CameraThread(threading.Thread):
             if ids is not None:
                 cv2.aruco.drawDetectedMarkers(frame_display, corners, ids)
                 ids_list = ids.flatten().tolist()
-                
-                # Cerca prima l'ID piccolo (4), poi il grande (0)
                 if 4 in ids_list: idx = ids_list.index(4)
                 elif 0 in ids_list: idx = ids_list.index(0)
                 else: idx = -1
@@ -127,7 +123,7 @@ class CameraThread(threading.Thread):
                     dyn_center_x = CAM_W // 2
                     dyn_center_y = CAM_H // 2
                     
-                    # Calcolo vero centro proiettivo
+                    # Calculation of the intersection point of the diagonals for better centering
                     p0, p1, p2, p3 = c[0], c[1], c[2], c[3]
                     A1, B1 = p2[1] - p0[1], p0[0] - p2[0]
                     C1 = A1 * p0[0] + B1 * p0[1]
@@ -147,14 +143,15 @@ class CameraThread(threading.Thread):
                     
                     cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
 
-            # Scrive nel buffer in modo sicuro
+            # Write to shared buffer (ZOH)
             self.buffer.write(cx, cy, frame_display)
             
         cap.release()
-        print("[Visione] Telecamera spenta.")
+        print("[Vision] Camera turned off.")
 
     def stop(self):
         self.running = False
+
 # --- TELEMETRY BACKGROUND ---
 current_alt = 0.0
 async def telemetry_loop(drone):
@@ -162,6 +159,7 @@ async def telemetry_loop(drone):
     async for pos in drone.telemetry.position():
         current_alt = pos.relative_altitude_m
 log_data = {}
+
 # --- MAIN LOOP ---
 async def run():
     global current_alt, log_data
@@ -177,7 +175,7 @@ async def run():
     # PID Gains (30Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
     KP_Y, KD_Y = 0.0012, 0.003
-    KI = 0.00035   # <--- NUOVO: Integrale Gain
+    KI = 0.00035   # <--- Integral Gain 
     
     cruise_altitude_reached = False 
     
@@ -194,7 +192,7 @@ async def run():
     integ_y = 0.0
     integ_max = 1000.0 # Anti-Windup Limit
 
-    # Decollo
+    # Arming
     print("-- Arming & Takeoff")
     await drone.action.arm()
     await drone.action.takeoff()
@@ -210,11 +208,11 @@ async def run():
     log_data = {
         'time': [],
         'alt': [],
-        'pos_x_est': [],  # Posizione stimata dal Kalman
+        'pos_x_est': [],  #Estimated position (or error) at each timestep, useful for post-analysis of control performance. You can also log raw measurements if you prefer.
         'pos_y_est': [],
-        'vel_x_cmd': [],  # Comando inviato
+        'vel_x_cmd': [],  
         'vel_y_cmd': [],
-        'target_visible': [] # 1 se visto, 0 se perso
+        'target_visible': [] 
     }
     start_log_time = time.time()
     while True:
@@ -235,10 +233,10 @@ async def run():
         # --- Parallax Correction ---
         CAMERA_OFFSET_X = -0.05   # Camera forward of COM 
         CAMERA_OFFSET_Z = 0.15   # Camera lower than COM 
-        FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. Se 640x480 usa ~550)
+        FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. If 640x480 use ~550)
 
-        # 1. Calculo Altitudine Effettiva della Camera
-        # If the camera is below the COM, the effective altitude for parallax is above, it's lower.
+        # 1. Calculation of effective altitude for parallax correction
+        # If the camera is below the COM, the effective altitude for parallax is lower.
         cam_alt = max(current_alt - CAMERA_OFFSET_Z, 0.4) 
         
         # 2. Offset pixel to meter conversion (parallax)
@@ -249,29 +247,29 @@ async def run():
         est_x = est_x + expected_pixel_offset
         est_y = est_y  # No correction needed on Y for forward offset
         
-        # --- B. CONTROLLO ---
+        # --- B. CONTROL ---
         cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
         
-        # STATO 1: Takeoff
+        # STATE 1: Takeoff
         if not cruise_altitude_reached:
             if current_alt >= TARGET_ALTITUDE - 0.5:
-                print("--- QUOTA RAGGIUNTA ---")
+                print("--- ALTITUDE REACHED ---")
                 cruise_altitude_reached = True
-                last_seen_time = time.time() # Reset timer vista
+                last_seen_time = time.time() # Reset sight timer
             else:
                 cmd_z = -1.0
-                if measurement is not None: # Centratura preventiva
+                if measurement is not None: # Preventing centering on noise during takeoff
                      cmd_y = (est_x * KP_X)
                      cmd_x = -((est_y * KP_Y))
 
-        # STATO 2: descent + search
+        # STATE 2: descent + search
         else:
-            # Check se abbiamo il target ORA
+            # Check if we have a recent sighting of the target (within the last 1.5 seconds)
             target_visible = (time.time() - last_seen_time) < 1.5
 
             # --- 2A. Target Tracking ---
             if target_visible:
-                # Reset Research
+                # Reset Search
                 if search_active:
                     print(">>> TARGET LOCKED! STOP RESEARCH <<<")
                     search_active = False
@@ -288,13 +286,13 @@ async def run():
                     dampener = 1.0
                     max_speed_xy = 1.4
 
-                # --- CALCOLO PID COMPLETO (P + I + D + FF) ---
+                # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 
                 # --- Cutting Integral last meter (FREEZE LOGIC) ---
                 INTEGRAL_CUTOFF_HEIGHT = 0.7
                 
                 if current_alt > INTEGRAL_CUTOFF_HEIGHT:
-                    # FFlying above cutoff, integral is active
+                    # Flying above cutoff, integral is active
                     integ_x += est_x * DT
                     integ_y += est_y * DT
                     
@@ -304,43 +302,43 @@ async def run():
                 else:
                     
                     pass
-                # 3. Feed-Forward Gain (Stima Velocità)
+                # 3. Feed-Forward Gain (Velocity Estimate)
                 if abs(est_x) < 25 or abs(est_y) < 25:
-                    ff_gain = 0.0  # Se siamo molto vicini, disabiliti
+                    ff_gain = 0.0  # If we are very close, disable it
                 elif current_alt < 1.15:
-                    ff_gain = 0.0020  # Guadagno più conservativo in discesa
+                    ff_gain = 0.0020  # More conservative gain during descent
                 else:
                     ff_gain = 0.0035 
 
                 # 4. Total PID
-                # Asse Y (Roll)
+                # Y Axis (Roll)
                 cmd_y = (est_x * KP_X * dampener) + \
                         (est_vx * KD_X * dampener) + \
                         (integ_x * KI) + \
                         (est_vx * ff_gain)
                 
-                # Asse X (Pitch)
+                # X Axis (Pitch)
                 cmd_x = -((est_y * KP_Y * dampener) + \
                           (est_vy * KD_Y * dampener) + \
                           (integ_y * KI) + \
                           (est_vy * (ff_gain)))
                 
                 # --- END PID ---
-#In the landing zone we cannot assure all the pixel as before, so we will set a treshhold
+# In the landing zone we cannot assure all the pixel as before, so we will set a threshold
                 
                 # Clamping
                 cmd_x = np.clip(cmd_x, -max_speed_xy, max_speed_xy)
                 cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
 
-                # Gestione Discesa
+                # Descent Management
                 current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.85 else (ALIGN_THRESHOLD * 2.5)
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                 
-                # --- LOGGING (Dentro il While) ---
+                # --- LOGGING (Inside the While) ---
                 current_log_time = time.time() - start_log_time
                 log_data['time'].append(current_log_time)
                 log_data['alt'].append(current_alt)
-                log_data['pos_x_est'].append(est_x) # O l'errore raw se preferisci
+                log_data['pos_x_est'].append(est_x) # Or the raw error if you prefer
                 log_data['pos_y_est'].append(est_y)
                 log_data['vel_x_cmd'].append(cmd_x)
                 log_data['vel_y_cmd'].append(cmd_y)
@@ -349,7 +347,7 @@ async def run():
                     final_descent_speed = 0.13 if current_alt < 0.85 else 0.30
                     cmd_z = final_descent_speed
                 else:
-                    # Hovering correttivo
+                    # Corrective hovering
                     cmd_z = 0.0 
 
             # --- 2B. TARGET LOST:recognition ---
@@ -359,23 +357,23 @@ async def run():
                 
                 time_since_loss = time.time() - last_seen_time
                 
-                # Fase 1: Wait (Anti-Glitch) - 1.5 secondi
+                # Phase 1: Wait (Anti-Glitch) - 1.5 seconds
                 if time_since_loss < 2.5:
                     cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
-                    if time_since_loss > 1.5: # Print solo dopo 1 secondo per non spammare
+                    if time_since_loss > 1.5: # Print only after 1 second to not spam
                         print(f"WAITING... {time_since_loss:.2f}")
-                # Fase 2: Search Mode (Spirale + Risalita)
+                # Phase 2: Search Mode (Spiral + Ascent)
                 else:
                     if not search_active:
                         print(f">>> LOST IN LANDING, INITIATING SEARCH <<<")
                         search_active = True
                         search_start_time = time.time()
                         search_leg_index = 0
-                        search_leg_duration = 1.5 # Spirale veloce
+                        search_leg_duration = 1.5 # Fast spiral
                     
                     dt_search = time.time() - search_start_time
-                    
-                    # Gestione Spirale (invariata)
+
+                    # Spiral Management (unchanged)
                     if dt_search > search_leg_duration:
                         search_leg_index += 1
                         search_start_time = time.time()
@@ -390,7 +388,7 @@ async def run():
                     elif direction == 2: cmd_x, cmd_y = -spd, 0.0
                     elif direction == 3: cmd_x, cmd_y = 0.0, -spd
                     
-                    # --- LA MODIFICA CRUCIALE: RISALITA ---
+                    # --- THE CRUCIAL MODIFICATION: ASCENT ---
                     # If we lost target, we might be too low to see it again. To avoid getting stuck in a blind spot, we will command a slow ascent until we reach a certain ceiling where we can search effectively.
                     SEARCH_CEILING = 5.0
                     
@@ -408,7 +406,7 @@ async def run():
              await drone.action.kill()
              break
 
-        # --- D. COMANDO ---
+        # --- D. COMMAND ---
         await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, cmd_z, 0.0))
 
         # --- E. TIMING ---
@@ -425,12 +423,12 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Errore imprevisto: {e}")
     finally:
-        # Ora controlliamo se log_data ha effettivamente dei dati prima di plottare
+        # Now we check if log_data actually has data before plotting
         if 'time' in log_data and len(log_data['time']) > 0:
             print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
             plot_results(log_data)
         else:
             print("Nessun dato registrato da plottare.")
             
-        print("Pulizia e chiusura...")
-        # Questo forza la chiusura dei thread appesi di MAVSDK/OpenCV
+        print("Cleaning and closing...")
+        # This forces the closure of hanging threads of MAVSDK/OpenCV
