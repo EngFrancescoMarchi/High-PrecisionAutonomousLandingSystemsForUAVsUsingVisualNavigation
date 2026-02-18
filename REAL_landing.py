@@ -4,11 +4,8 @@ import numpy as np
 import time
 import asyncio
 from mavsdk import System
-from gz.msgs10.entity_factory_pb2 import EntityFactory
-from gz.msgs10.pose_pb2 import Pose
-from mavsdk.offboard import (OffboardError, VelocityBodyYawspeed, PositionNedYaw)
+import threading
 import matplotlib.pyplot as plt
-import pandas as pd # Se vuoi salvare in Excel/CSV
 from plot_results import plot_results
 
 try:
@@ -35,22 +32,25 @@ class SharedBuffer:
         self.frame = None
         self.new_data = False
         self.last_receive_time = 0.0
+        self.lock = threading.Lock()
 
     def write(self, u, v, frame):
-        if u is not None and v is not None:
-            self.measurement = np.array([[u], [v]])
-        else:
-            self.measurement = None
-        self.frame = frame
-        self.new_data = True
-        self.last_receive_time = time.time()
+        with self.lock:
+            if u is not None and v is not None:
+                self.measurement = np.array([[u], [v]])
+            else:
+                self.measurement = None
+            self.frame = frame
+            self.new_data = True
+            self.last_receive_time = time.time()
 
     def read(self):
-        data = self.measurement
-        is_fresh = self.new_data
-        frame = self.frame
-        self.new_data = False
-        return data, frame, is_fresh
+        with self.lock:
+            data = self.measurement
+            is_fresh = self.new_data
+            frame = self.frame
+            self.new_data = False
+            return data, frame, is_fresh
 
 # --- KALMAN FILTER ---
 class LandingKalmanFilter:
@@ -78,63 +78,83 @@ class LandingKalmanFilter:
 # --- VISION CALLBACK ---
 shared_buffer = SharedBuffer()
 
-def vision_callback(msg):
-    try:
-        img_buf = np.frombuffer(msg.data, dtype=np.uint8)
-        img = img_buf.reshape((msg.height, msg.width, 3))
-        
-        frame_display = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
-        
-        corners, ids, _ = detector.detectMarkers(gray)
-        cx, cy = None, None
-        if ids is not None:
-            cv2.aruco.drawDetectedMarkers(frame_display, corners, ids)
-            ids_list = ids.flatten().tolist()
-            if 4 in ids_list:
-                idx = ids_list.index(4)
-                
-            elif 0 in ids_list:
-                idx = ids_list.index(0)
-                
-            else:
-                idx = -1
-    
-            if idx != -1:
-                c = corners[idx][0]
-                dyn_center_x = msg.width // 2
-                dyn_center_y = msg.height // 2
-                
-                # --- CALCOLO VERO CENTRO PROIETTIVO (Intersezione Diagonali) ---
-                p0, p1, p2, p3 = c[0], c[1], c[2], c[3]
-                
-                # Retta 1 (Diagonale da p0 a p2)
-                A1 = p2[1] - p0[1]
-                B1 = p0[0] - p2[0]
-                C1 = A1 * p0[0] + B1 * p0[1]
-                
-                # Retta 2 (Diagonale da p1 a p3)
-                A2 = p3[1] - p1[1]
-                B2 = p1[0] - p3[0]
-                C2 = A2 * p1[0] + B2 * p1[1]
-                
-                det = A1 * B2 - A2 * B1
-                
-                if det != 0:
-                    true_cx = (B2 * C1 - B1 * C2) / det
-                    true_cy = (A1 * C2 - A2 * C1) / det
-                else:
-                    # Fallback di emergenza
-                    true_cx, true_cy = np.mean(c[:, 0]), np.mean(c[:, 1])
-                
-                cx = int(true_cx) - dyn_center_x
-                cy = int(true_cy) - dyn_center_y
-                
-                cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
-        shared_buffer.write(cx, cy, frame_display) 
-    except Exception:
-        pass
+# --- IL NUOVO CERVELLO OTTICO (THREAD SEPARATO) ---
+# --- IL NUOVO CERVELLO OTTICO (THREAD SEPARATO) ---
+class CameraThread(threading.Thread):
+    def __init__(self, buffer):
+        super().__init__()
+        self.buffer = buffer
+        self.daemon = True # Il thread muore quando premi Ctrl+C
+        self.running = True
 
+    def run(self):
+        print("[Visione] Inizializzazione telecamera fisica...")
+        # NOTA: 0 è per webcam USB. Se usi la PiCamera CSI serve la stringa GStreamer!
+        cap = cv2.VideoCapture(0, cv2.CAP_V4L2) 
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
+        cap.set(cv2.CAP_PROP_FPS, FREQ)
+
+        if not cap.isOpened():
+            print("[Visione] ERRORE CRITICO: Telecamera non trovata!")
+            self.running = False
+            return
+
+        print(f"[Visione] Webcam USB Pronta: {CAM_W}x{CAM_H} @ {FREQ}fps")
+
+        while self.running:
+            ret, frame = cap.read() # Questa riga BLOCCA, ma essendo in un thread, MAVSDK è salvo!
+            if not ret or frame is None:
+                continue
+            
+            frame_display = frame.copy()
+            gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
+            corners, ids, _ = detector.detectMarkers(gray)
+            cx, cy = None, None
+
+            if ids is not None:
+                cv2.aruco.drawDetectedMarkers(frame_display, corners, ids)
+                ids_list = ids.flatten().tolist()
+                
+                # Cerca prima l'ID piccolo (4), poi il grande (0)
+                if 4 in ids_list: idx = ids_list.index(4)
+                elif 0 in ids_list: idx = ids_list.index(0)
+                else: idx = -1
+
+                if idx != -1:
+                    c = corners[idx][0]
+                    dyn_center_x = CAM_W // 2
+                    dyn_center_y = CAM_H // 2
+                    
+                    # Calcolo vero centro proiettivo
+                    p0, p1, p2, p3 = c[0], c[1], c[2], c[3]
+                    A1, B1 = p2[1] - p0[1], p0[0] - p2[0]
+                    C1 = A1 * p0[0] + B1 * p0[1]
+                    
+                    A2, B2 = p3[1] - p1[1], p1[0] - p3[0]
+                    C2 = A2 * p1[0] + B2 * p1[1]
+                    det = A1 * B2 - A2 * B1
+                    
+                    if det != 0:
+                        true_cx = (B2 * C1 - B1 * C2) / det
+                        true_cy = (A1 * C2 - A2 * C1) / det
+                    else:
+                        true_cx, true_cy = np.mean(c[:, 0]), np.mean(c[:, 1])
+                    
+                    cx = int(true_cx) - dyn_center_x
+                    cy = int(true_cy) - dyn_center_y
+                    
+                    cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
+
+            # Scrive nel buffer in modo sicuro
+            self.buffer.write(cx, cy, frame_display)
+            
+        cap.release()
+        print("[Visione] Telecamera spenta.")
+
+    def stop(self):
+        self.running = False
 # --- TELEMETRY BACKGROUND ---
 current_alt = 0.0
 async def telemetry_loop(drone):
@@ -145,18 +165,15 @@ log_data = {}
 # --- MAIN LOOP ---
 async def run():
     global current_alt, log_data
-    # Setup
     drone = System()
-    await drone.connect(system_address="udp://:14540")
-    print("Waiting for connection...")
+    print("-- Connessione al Pixhawk 6C via Seriale...")
+    await drone.connect(system_address="serial:///dev/ttyTHS1:921600")
     async for state in drone.core.connection_state():
         if state.is_connected: break
-
-    node = Node()
-    node.subscribe(Image, "/camera", vision_callback)
     kf = LandingKalmanFilter(DT)
     asyncio.create_task(telemetry_loop(drone))
-
+    cam_thread = CameraThread(shared_buffer)
+    cam_thread.start()
     # PID Gains (30Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
     KP_Y, KD_Y = 0.0012, 0.003
