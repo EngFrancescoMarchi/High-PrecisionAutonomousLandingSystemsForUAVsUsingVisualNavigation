@@ -18,7 +18,7 @@ except ImportError:
     print("ERRORE CRITICO")
     sys.exit(1)
 
-FREQ = 25.0             #upadating at 30Hz for better performance with HD stream
+FREQ = 100.0             #
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 5.5   # Target altitude for initial hover before descent (meters)
 ALIGN_THRESHOLD = 60    # Pixel tolerance to start descent
@@ -264,12 +264,8 @@ async def run():
             #Damper is the scale of the calculated force, 
             # in this case we will use 40% of calculated, avoid shaking
                 # Gain Scheduling
-                if current_alt < 0.65:
-                    dampener = 0.25
-                    max_speed_xy = 0.35
-                else:
-                    dampener = 1.0
-                    max_speed_xy = 1.4
+                dampener = np.clip((current_alt - 0.5) / 1.2, 0.20, 1.0)
+                max_speed_xy = np.clip(current_alt * 0.8, 0.35, 1.4)
 
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 
