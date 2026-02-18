@@ -179,8 +179,14 @@ cam_thread = None
 async def run():
     global current_alt, log_data, cam_thread
     drone = System()
-    print("-- Connessione al Pixhawk 6C via Seriale...")
-    await drone.connect(system_address="serial:///dev/ttyTHS1:921600")
+    print("Connessione al drone su /dev/ttyTHS1 (1M baud)...")
+    await drone.connect(system_address="serial:///dev/ttyTHS1:1000000")
+    
+    print("In attesa della connessione MAVLink...")
+    async for state in drone.core.connection_state():
+        if state.is_connected: 
+            print("--- HARDWARE LINK ATTIVO ---")
+            break
     async for state in drone.core.connection_state():
         if state.is_connected: break
     kf = LandingKalmanFilter(DT)

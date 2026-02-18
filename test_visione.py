@@ -6,7 +6,7 @@ import threading
 # Impostazioni Camera
 CAM_W, CAM_H = 640, 480
 CENTER_X, CENTER_Y = CAM_W // 2, CAM_H // 2
-CONTROL_FREQ = 50.0  # Simuliamo la lettura a 50Hz del loop principale
+CONTROL_FREQ = 100.0  # Simuliamo la lettura a 50Hz del loop principale
 DT = 1.0 / CONTROL_FREQ
 
 # --- BUFFER CONDIVISO (Come nel main) ---
@@ -45,7 +45,9 @@ def vision_thread_func():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
     cap.set(cv2.CAP_PROP_FPS, 30)
-
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+    cap.set(cv2.CAP_PROP_EXPOSURE, 100)
     if not cap.isOpened():
         print("ERRORE CRITICO: Impossibile aprire la telecamera. Cavo USB collegato?")
         stop_thread = True

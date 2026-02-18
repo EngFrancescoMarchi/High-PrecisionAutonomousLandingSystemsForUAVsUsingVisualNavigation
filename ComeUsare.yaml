@@ -55,10 +55,6 @@ gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0.28, y
 gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: -0.14, y: 0.14, z: 0.0}"
 gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0, y: 0, z: 0.0}"
 
-Per il vento:
-
-gz service -s /world/default/model/x500_vision_0/link/base_link/apply_wrench \
---reqtype gz.msgs.EntityWrench \
---reptype gz.msgs.Boolean \
---timeout 1000 \
---req 'entity: {name: "x500_vision_0", type: MODEL}, wrench: {force: {x: 2.5, y: 1.0, z: 0.0}, torque: {x: 0.05, y: 0.1, z: 0.05}}'
+ssh safwan@172.20.10.3
+nano test_visione.py
+python3 test_visione.py
