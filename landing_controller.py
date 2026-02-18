@@ -18,32 +18,40 @@ except ImportError:
     print("ERRORE CRITICO")
     sys.exit(1)
 
-FREQ = 30.0             #upadating at 30Hz for better performance with HD stream
+FREQ = 25.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
-TARGET_ALTITUDE = 10.0   # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 80    # Pixel tolerance to start descent
+TARGET_ALTITUDE = 5   # Target altitude for initial hover before descent (meters)
+ALIGN_THRESHOLD = 60    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
-CAM_W, CAM_H = 1280, 720
+CAM_W, CAM_H = 640,480
 CENTER_X, CENTER_Y = CAM_W // 2, CAM_H // 2
-
+aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+parameters = cv2.aruco.DetectorParameters()
+detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
 # --- ZOH as buffer ---
 class SharedBuffer:
     def __init__(self):
         self.measurement = None 
+        self.frame = None
         self.new_data = False
         self.last_receive_time = 0.0
 
-    def write(self, u, v):
-        self.measurement = np.array([[u], [v]])
+    def write(self, u, v, frame):
+        if u is not None and v is not None:
+            self.measurement = np.array([[u], [v]])
+        else:
+            self.measurement = None
+        self.frame = frame
         self.new_data = True
         self.last_receive_time = time.time()
 
     def read(self):
         data = self.measurement
         is_fresh = self.new_data
+        frame = self.frame
         self.new_data = False
-        return data, is_fresh
+        return data, frame, is_fresh
 
 # --- KALMAN FILTER ---
 class LandingKalmanFilter:
@@ -79,9 +87,10 @@ def vision_callback(msg):
         frame_display = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
         
-        corners, ids, _ = cv2.aruco.detectMarkers(gray, cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50))
-        
+        corners, ids, _ = detector.detectMarkers(gray)
+        cx, cy = None, None
         if ids is not None:
+            cv2.aruco.drawDetectedMarkers(frame_display, corners, ids)
             ids_list = ids.flatten().tolist()
             if 4 in ids_list:
                 idx = ids_list.index(4)
@@ -91,16 +100,15 @@ def vision_callback(msg):
                 
             else:
                 idx = -1
-
+    
             if idx != -1:
                 c = corners[idx][0]
-                cx = int(np.mean(c[:, 0])) - CENTER_X
-                cy = int(np.mean(c[:, 1])) - CENTER_Y
-                shared_buffer.write(cx, cy) 
-                
-        # Opening The window here to avoid issues with Gazebo's rendering loop and OpenCV's imshow
-        cv2.imshow("Drone View", frame_display)
-        cv2.waitKey(1)
+                dyn_center_x = msg.width // 2
+                dyn_center_y = msg.height // 2
+                cx = int(np.mean(c[:, 0])) -dyn_center_x
+                cy = int(np.mean(c[:, 1])) - dyn_center_y
+                cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
+        shared_buffer.write(cx, cy, frame_display) 
     except Exception:
         pass
 
@@ -127,8 +135,8 @@ async def run():
     asyncio.create_task(telemetry_loop(drone))
 
     # PID Gains (30Hz + HD)
-    KP_X, KD_X = 0.0005, 0.002 
-    KP_Y, KD_Y = 0.0005, 0.002
+    KP_X, KD_X = 0.0012, 0.003
+    KP_Y, KD_Y = 0.001, 0.003
     KI = 0.00035   # <--- NUOVO: Integrale Gain
     
     cruise_altitude_reached = False 
@@ -171,8 +179,10 @@ async def run():
     start_log_time = time.time()
     while True:
     
-        measurement, is_new = shared_buffer.read()
-        
+        measurement, frame_to_show, is_new = shared_buffer.read()
+        if frame_to_show is not None:
+            cv2.imshow("Drone Gazebo Vision", frame_to_show)
+            cv2.waitKey(1)
         # Kalman Prediction & Update
         est_state = kf.predict() 
         if is_new and measurement is not None:
@@ -185,11 +195,11 @@ async def run():
         # --- Parallax Correction ---
         CAMERA_OFFSET_X = -0.05   # Camera forward of COM 
         CAMERA_OFFSET_Z = 0.15   # Camera lower than COM 
-        FOCAL_LENGTH    = 1100.0 # Pixel ( 720p/1080p. Se 640x480 usa ~550)
+        FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. Se 640x480 usa ~550)
 
         # 1. Calculo Altitudine Effettiva della Camera
         # If the camera is below the COM, the effective altitude for parallax is above, it's lower.
-        cam_alt = max(current_alt - CAMERA_OFFSET_Z, 0.7) 
+        cam_alt = max(current_alt - CAMERA_OFFSET_Z, 0.4) 
         
         # 2. Offset pixel to meter conversion (parallax)
         expected_pixel_offset = (CAMERA_OFFSET_X * FOCAL_LENGTH) / cam_alt
@@ -231,17 +241,17 @@ async def run():
             #Damper is the scale of the calculated force, 
             # in this case we will use 40% of calculated, avoid shaking
                 # Gain Scheduling
-                if current_alt < 0.65:
-                    dampener = 0.1
-                    max_speed_xy = 0.3 
+                if current_alt < 0.75:
+                    dampener = 0.35
+                    max_speed_xy = 0.4 
                 else:
                     dampener = 1.0
-                    max_speed_xy = 1.1
+                    max_speed_xy = 1.4
 
                 # --- CALCOLO PID COMPLETO (P + I + D + FF) ---
                 
                 # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                INTEGRAL_CUTOFF_HEIGHT = 0.8
+                INTEGRAL_CUTOFF_HEIGHT = 0.7
                 
                 if current_alt > INTEGRAL_CUTOFF_HEIGHT:
                     # FFlying above cutoff, integral is active
@@ -255,9 +265,9 @@ async def run():
                     
                     pass
                 # 3. Feed-Forward Gain (Stima Velocità)
-                if abs(est_x) < 40 or abs(est_y) < 40:
+                if abs(est_x) < 25 or abs(est_y) < 25:
                     ff_gain = 0.0  # Se siamo molto vicini, disabiliti
-                elif current_alt < 1.5:
+                elif current_alt < 1.05:
                     ff_gain = 0.0015  # Guadagno più conservativo in discesa
                 else:
                     ff_gain = 0.0035 
@@ -283,7 +293,7 @@ async def run():
                 cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
 
                 # Gestione Discesa
-                current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.85 else (ALIGN_THRESHOLD * 3)
+                current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.85 else (ALIGN_THRESHOLD * 2.5)
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                 
                 # --- LOGGING (Dentro il While) ---
