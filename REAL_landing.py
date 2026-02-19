@@ -16,10 +16,10 @@ except ImportError:
     print("Critical Error")
     sys.exit(1)
 
-FREQ = 25.0             #upadating at 30Hz for better performance with HD stream
+FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 5.5   # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 60    # Pixel tolerance to start descent
+ALIGN_THRESHOLD = 45    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
@@ -328,7 +328,7 @@ async def run():
                         
                         pass
                     # 3. Feed-Forward Gain (Velocity Estimate)
-                    if abs(est_x) < 25 or abs(est_y) < 25:
+                    if abs(est_x) < 20 or abs(est_y) < 20:
                         ff_gain = 0.0  # If we are very close, disable it
                     elif current_alt < 1.15:
                         ff_gain = 0.0020  # More conservative gain during descent
