@@ -6,15 +6,8 @@ import asyncio
 from mavsdk import System
 from mavsdk.offboard import (OffboardError, VelocityBodyYawspeed) 
 import threading
-import matplotlib.pyplot as plt
-from plot_results import plot_results
-
-try:
-    from gz.transport13 import Node
-    from gz.msgs10.image_pb2 import Image
-except ImportError:
-    print("Critical Error")
-    sys.exit(1)
+#import matplotlib.pyplot as plt
+#from plot_results import plot_results
 
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
@@ -321,8 +314,8 @@ async def run():
                 #Damper is the scale of the calculated force, 
                 # in this case we will use 40% of calculated, avoid shaking
                     # Gain Scheduling
-                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.20, 1.0)
-                    max_speed_xy = np.clip(current_alt * 0.8, 0.35, 1.4)
+                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.3, 1.0)
+                    max_speed_xy = np.clip(current_alt * 0.8, 0.5, 1.4)
 
                     # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                     
@@ -469,7 +462,7 @@ if __name__ == "__main__":
         # Now we check if log_data actually has data before plotting
         if 'time' in log_data and len(log_data['time']) > 0:
             print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
-            plot_results(log_data)
+            #plot_results(log_data)
         else:
             print("Nessun dato registrato da plottare.")
             

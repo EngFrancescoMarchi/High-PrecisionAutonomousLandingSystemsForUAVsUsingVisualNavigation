@@ -55,6 +55,6 @@ gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0.28, y
 gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: -0.14, y: 0.14, z: 0.0}"
 gz topic -t /model/gva_platform/cmd_vel -m gz.msgs.Twist -p "linear: {x: 0, y: 0, z: 0.0}"
 
-ssh safwan@172.20.10.3
+ssh safwan@192.168.10.120
 nano test_visione.py
 python3 test_visione.py
