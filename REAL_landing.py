@@ -216,9 +216,18 @@ async def run():
     integ_max = 1000.0 # Anti-Windup Limit
 
     # Arming
+    # async for health in drone.telemetry.health():
+    async for health in drone.telemetry.health():
+        if health.is_global_position_ok and health.is_local_position_ok and health.is_home_position_ok:
+            print("-- Check unlocked, global/local position and home position: OK")
+        break
     print("-- Arming & Takeoff")
-    await drone.action.arm()
-    await drone.action.takeoff()
+    try:
+        await drone.action.arm()
+    except Exception as e:
+        print(f"!!! Critical error: {e} !!!")
+        cam_thread.stop()
+        return
     await asyncio.sleep(8)
     
     print(f"--- MISSION START ({FREQ} Hz) ---")
@@ -242,9 +251,7 @@ async def run():
     while True:
     
         measurement, frame_to_show, is_new = shared_buffer.read()
-        if frame_to_show is not None:
-            cv2.imshow("Drone Gazebo Vision", frame_to_show)
-            cv2.waitKey(1)
+    
         # Kalman Prediction & Update
         est_state = kf.predict() 
         if is_new and measurement is not None:
@@ -383,8 +390,8 @@ async def run():
                     
                     time_since_loss = time.time() - last_seen_time
                     
-                    # Phase 1: Wait (Anti-Glitch) - 1.5 seconds
-                    if time_since_loss < 2.5:
+                    # Phase 1: Wait (Anti-Glitch) - 3 seconds
+                    if time_since_loss < 3:
                         cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
                         if time_since_loss > 1.5: # Print only after 1 second to not spam
                             print(f"WAITING... {time_since_loss:.2f}")
@@ -429,7 +436,8 @@ async def run():
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
              try: await drone.offboard.stop()
              except: pass
-             await drone.action.kill()
+             #await drone.action.kill()
+             await drone.action.land()
              break
 
         # --- D. COMMAND ---
