@@ -45,7 +45,9 @@ def vision_thread_func():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
     cap.set(cv2.CAP_PROP_FPS, 30)
-
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+    cap.set(cv2.CAP_PROP_EXPOSURE, 100)
     if not cap.isOpened():
         print("ERRORE CRITICO: Impossibile aprire la telecamera. Cavo USB collegato?")
         stop_thread = True
