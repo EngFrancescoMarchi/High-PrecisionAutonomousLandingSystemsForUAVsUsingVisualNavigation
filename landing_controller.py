@@ -179,8 +179,17 @@ async def run():
 
     # Takeoff
     print("-- Arming & Takeoff")
-    await drone.action.arm()
-    await drone.action.takeoff()
+    # async for health in drone.telemetry.health():
+    async for health in drone.telemetry.health():
+        if health.is_global_position_ok and health.is_local_position_ok and health.is_home_position_ok:
+            print("-- Check unlocked, global/local position and home position: OK")
+        break
+    print("-- Arming & Takeoff")
+    try:
+        await drone.action.arm()
+    except Exception as e:
+        print(f"!!! Critical error: {e} !!!")
+        return
     await asyncio.sleep(8)
     
     print(f"--- MISSION START ({FREQ} Hz) ---")
@@ -216,7 +225,7 @@ async def run():
         est_y, est_vy = est_state[2][0], est_state[3][0]
         
         # --- Parallax Correction ---
-        CAMERA_OFFSET_X = -0.05   # Camera forward of COM 
+        CAMERA_OFFSET_Y = 0.05   # Camera forward of COM 
         CAMERA_OFFSET_Z = 0.15   # Camera lower than COM 
         FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. If 640x480 use ~550)
 
@@ -225,12 +234,12 @@ async def run():
         cam_alt = max(current_alt - CAMERA_OFFSET_Z, 0.4) 
         
         # 2. Offset pixel to meter conversion (parallax)
-        expected_pixel_offset = (CAMERA_OFFSET_X * FOCAL_LENGTH) / cam_alt
+        expected_pixel_offset = (CAMERA_OFFSET_Y * FOCAL_LENGTH) / cam_alt
         
         # 3. Application
         #If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
-        est_x = est_x + expected_pixel_offset
-        est_y = est_y  # No correction needed on Y for forward offset
+        est_x = est_x 
+        est_y = est_y + expected_pixel_offset # No correction needed on Y for forward offset
         
         # --- B. CONTROL ---
         cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
@@ -264,8 +273,8 @@ async def run():
             #Damper is the scale of the calculated force, 
             # in this case we will use 40% of calculated, avoid shaking
                 # Gain Scheduling
-                dampener = np.clip((current_alt - 0.5) / 1.2, 0.20, 1.0)
-                max_speed_xy = np.clip(current_alt * 0.8, 0.35, 1.4)
+                dampener = np.clip((current_alt - 0.5) / 1.2, 0.10, 0.9)
+                max_speed_xy = np.clip(current_alt * 0.8, 0.27, 1.2)
 
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 
@@ -339,7 +348,7 @@ async def run():
                 time_since_loss = time.time() - last_seen_time
                 
                 # Phase 1: Wait (Anti-Glitch) - 1.5 seconds
-                if time_since_loss < 2.5:
+                if time_since_loss < 3:
                     cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
                     if time_since_loss > 1.5: # Print only after 1 second to not spam
                         print(f"WAITING... {time_since_loss:.2f}")
