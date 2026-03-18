@@ -160,7 +160,7 @@ async def run():
     # PID Gains (30Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
     KP_Y, KD_Y = 0.0012, 0.003
-    KI = 0.00035   # <--- NEW: Integral Gain
+    KI = 0.0004   # <--- NEW: Integral Gain
     
     cruise_altitude_reached = False 
     
@@ -231,7 +231,7 @@ async def run():
 
         # 1. Calculate Effective Camera Altitude
         # If the camera is below the COM, the effective altitude for parallax is lower.
-        cam_alt = max(current_alt - CAMERA_OFFSET_Z, 0.4) 
+        cam_alt = max(current_alt - CAMERA_OFFSET_Z, 1) 
         
         # 2. Offset pixel to meter conversion (parallax)
         expected_pixel_offset = (CAMERA_OFFSET_Y * FOCAL_LENGTH) / cam_alt
@@ -251,7 +251,7 @@ async def run():
                 cruise_altitude_reached = True
                 last_seen_time = time.time() # Reset timer vista
             else:
-                cmd_z = -1.0
+                cmd_z = -1.5
                 if measurement is not None: # Preventive centering
                      cmd_y = (est_x * KP_X)
                      cmd_x = -((est_y * KP_Y))
@@ -273,32 +273,25 @@ async def run():
             #Damper is the scale of the calculated force, 
             # in this case we will use 40% of calculated, avoid shaking
                 # Gain Scheduling
-                dampener = np.clip((current_alt - 0.5) / 1.2, 0.10, 0.9)
-                max_speed_xy = np.clip(current_alt * 0.8, 0.27, 1.2)
+                dampener = np.clip((current_alt - 0.5) / 1.2, 0.40, 1)
+                max_speed_xy = np.clip(current_alt * 0.8, 0.45, 1.4)
 
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 
                 # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                INTEGRAL_CUTOFF_HEIGHT = 0.7
+                i_dampener = np.clip((current_alt - 0.2) / 0.8, 0.3, 1.0)
                 
-                if current_alt > INTEGRAL_CUTOFF_HEIGHT:
-                    # Flying above cutoff, integral is active
-                    integ_x += est_x * DT
-                    integ_y += est_y * DT
-                    
+                # L'errore viene moltiplicato per il dampener prima di essere sommato.
+                # In questo modo, vicino a terra smette di accumulare nuovi errori, 
+                # ma preserva perfettamente il valore totale raggiunto.
+                integ_x += (est_x * DT) * i_dampener
+                integ_y += (est_y * DT) * i_dampener
                     # Anti-Windup standard
-                    integ_x = np.clip(integ_x, -integ_max, integ_max)
-                    integ_y = np.clip(integ_y, -integ_max, integ_max)
-                else:
-                    
-                    pass
+                integ_x = np.clip(integ_x, -integ_max, integ_max)
+                integ_y = np.clip(integ_y, -integ_max, integ_max)
+                
                 # 3. Feed-Forward Gain (Velocity Estimate)
-                if abs(est_x) < 25 or abs(est_y) < 25:
-                    ff_gain = 0.0  # Se siamo molto vicini, disabiliti
-                elif current_alt < 1.15:
-                    ff_gain = 0.0020  # Guadagno più conservativo in discesa
-                else:
-                    ff_gain = 0.0035 
+                ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0, 0.002)
 
                 # 4. Total PID
                 # Y Axis (Roll)
@@ -321,7 +314,7 @@ async def run():
                 cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
 
                 # Descent Management
-                current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.85 else (ALIGN_THRESHOLD * 2.5)
+                current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.7 else (ALIGN_THRESHOLD * 2.5)
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                 
                 # --- LOGGING (Inside the While) ---
@@ -334,7 +327,7 @@ async def run():
                 log_data['vel_y_cmd'].append(cmd_y)
                 log_data['target_visible'].append(1 if target_visible else 0)
                 if is_aligned:
-                    final_descent_speed = 0.13 if current_alt < 0.85 else 0.30
+                    final_descent_speed = 0.25 if current_alt < 0.85 else 0.5
                     cmd_z = final_descent_speed
                 else:
                     # Corrective hovering
@@ -388,12 +381,13 @@ async def run():
                         cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.13 and cruise_altitude_reached:
+        if current_alt < 0.2 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
              try: await drone.offboard.stop()
              except: pass
-             await drone.action.kill()
+             #await drone.action.kill()
+             await drone.action.land()
              break
 
         # --- D. COMMAND ---
