@@ -12,7 +12,7 @@ import threading
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 5.5   # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 45    # Pixel tolerance to start descent
+ALIGN_THRESHOLD = 60    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
@@ -197,7 +197,7 @@ async def run():
     # PID Gains (30Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
     KP_Y, KD_Y = 0.0012, 0.003
-    KI = 0.00035   # <--- Integral Gain 
+    KI = 0.0004   # <--- Integral Gain 
     
     cruise_altitude_reached = False 
     
@@ -261,16 +261,16 @@ async def run():
         est_y, est_vy = est_state[2][0], est_state[3][0]
         
         # --- Parallax Correction ---
-        CAMERA_OFFSET_X = -0.05   # Camera forward of COM 
+        CAMERA_OFFSET_Y = 0.05   # Camera forward of COM 
         CAMERA_OFFSET_Z = 0.15   # Camera lower than COM 
         FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. If 640x480 use ~550)
 
         # 1. Calculation of effective altitude for parallax correction
         # If the camera is below the COM, the effective altitude for parallax is lower.
-        cam_alt = max(current_alt - CAMERA_OFFSET_Z, 0.4) 
+        cam_alt = max(current_alt - CAMERA_OFFSET_Z, 1) 
         
         # 2. Offset pixel to meter conversion (parallax)
-        expected_pixel_offset = (CAMERA_OFFSET_X * FOCAL_LENGTH) / cam_alt
+        expected_pixel_offset = (CAMERA_OFFSET_Y * FOCAL_LENGTH) / cam_alt
         
         # 3. Application
         #If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
@@ -314,32 +314,25 @@ async def run():
                 #Damper is the scale of the calculated force, 
                 # in this case we will use 40% of calculated, avoid shaking
                     # Gain Scheduling
-                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.3, 1.0)
-                    max_speed_xy = np.clip(current_alt * 0.8, 0.5, 1.4)
+                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
+                    max_speed_xy = np.clip(current_alt * 0.8, 0.45, 1.4)
 
                     # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                     
                     # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                    INTEGRAL_CUTOFF_HEIGHT = 0.7
-                    
-                    if current_alt > INTEGRAL_CUTOFF_HEIGHT:
-                        # Flying above cutoff, integral is active
-                        integ_x += est_x * DT
-                        integ_y += est_y * DT
-                        
+                    i_dampener = np.clip((current_alt - 0.2) / 0.8, 0.3, 1.0)
+                
+                    # L'errore viene moltiplicato per il dampener prima di essere sommato.
+                    # In questo modo, vicino a terra smette di accumulare nuovi errori, 
+                    # ma preserva perfettamente il valore totale raggiunto.
+                    integ_x += (est_x * DT) * i_dampener
+                    integ_y += (est_y * DT) * i_dampener
                         # Anti-Windup standard
-                        integ_x = np.clip(integ_x, -integ_max, integ_max)
-                        integ_y = np.clip(integ_y, -integ_max, integ_max)
-                    else:
-                        
-                        pass
+                    integ_x = np.clip(integ_x, -integ_max, integ_max)
+                    integ_y = np.clip(integ_y, -integ_max, integ_max)
                     # 3. Feed-Forward Gain (Velocity Estimate)
-                    if abs(est_x) < 20 or abs(est_y) < 20:
-                        ff_gain = 0.0  # If we are very close, disable it
-                    elif current_alt < 1.15:
-                        ff_gain = 0.0020  # More conservative gain during descent
-                    else:
-                        ff_gain = 0.0035 
+                    ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0, 0.002)
+ 
 
                     # 4. Total PID
                     # Y Axis (Roll)
@@ -362,7 +355,7 @@ async def run():
                     cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
 
                     # Descent Management
-                    current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.85 else (ALIGN_THRESHOLD * 2.5)
+                    current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.8 else (ALIGN_THRESHOLD * 2.5)
                     is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                     
                     # --- LOGGING (Inside the While) ---
