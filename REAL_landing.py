@@ -11,8 +11,8 @@ import threading
 
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
-TARGET_ALTITUDE = 5   # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 45    # Pixel tolerance to start descent
+TARGET_ALTITUDE = 5.5  # Target altitude for initial hover before descent (meters)
+ALIGN_THRESHOLD = 90    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
@@ -53,8 +53,8 @@ class LandingKalmanFilter:
         self.x = np.zeros((4, 1))
         self.F = np.array([[1, dt, 0, 0], [0, 1, 0, 0], [0, 0, 1, dt], [0, 0, 0, 1]])
         self.H = np.array([[1, 0, 0, 0], [0, 0, 1, 0]])
-        self.Q = np.eye(4) * 0.01 
-        self.R = np.eye(2) * 30.0  
+        self.Q = np.eye(4) * 0.02
+        self.R = np.eye(2) * 15.0  
         self.P = np.eye(4) * 1.0
 
     def predict(self):
@@ -315,12 +315,14 @@ async def run():
                 # in this case we will use 40% of calculated, avoid shaking
                     # Gain Scheduling
                     dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
-                    max_speed_xy = np.clip(current_alt * 0.8, 0.45, 1.4)
+                    max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
 
                     # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
-                    
+                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 2.5, 2.5])
+                    current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
+                    is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                     # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                    i_dampener = np.clip((current_alt - 0.2) / 0.7, 0.7, 1.0)
+                    i_dampener = np.clip((current_alt - 0.2) / 1.0, 0.3, 1.0)
                 
                     # L'errore viene moltiplicato per il dampener prima di essere sommato.
                     # In questo modo, vicino a terra smette di accumulare nuovi errori, 
@@ -353,11 +355,6 @@ async def run():
                     # Clamping
                     cmd_x = np.clip(cmd_x, -max_speed_xy, max_speed_xy)
                     cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
-
-                    # Descent Management
-                    current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.5 else (ALIGN_THRESHOLD * 2.5)
-                    is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
-                    
                     # --- LOGGING (Inside the While) ---
                     current_log_time = time.time() - start_log_time
                     log_data['time'].append(current_log_time)
@@ -369,8 +366,7 @@ async def run():
                     log_data['target_visible'].append(1 if target_visible else 0)
                     log_data['battery'].append(current_battery)
                     if is_aligned:
-                        final_descent_speed = 0.13 if current_alt < 0.85 else 0.30
-                        cmd_z = final_descent_speed
+                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.2, 0.5])
                     else:
                         # Corrective hovering
                         cmd_z = 0.0 
@@ -425,7 +421,7 @@ async def run():
         # --- C. TOUCHDOWN ---
         if current_alt < 0.06 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
-             await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
+             await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
              try: await drone.offboard.stop()
              except: pass
              #await drone.action.kill()
