@@ -11,8 +11,8 @@ import threading
 
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
-TARGET_ALTITUDE = 5.5   # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 60    # Pixel tolerance to start descent
+TARGET_ALTITUDE = 5   # Target altitude for initial hover before descent (meters)
+ALIGN_THRESHOLD = 45    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
@@ -320,7 +320,7 @@ async def run():
                     # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                     
                     # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                    i_dampener = np.clip((current_alt - 0.2) / 0.8, 0.3, 1.0)
+                    i_dampener = np.clip((current_alt - 0.2) / 0.7, 0.7, 1.0)
                 
                     # L'errore viene moltiplicato per il dampener prima di essere sommato.
                     # In questo modo, vicino a terra smette di accumulare nuovi errori, 
@@ -355,7 +355,7 @@ async def run():
                     cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
 
                     # Descent Management
-                    current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.8 else (ALIGN_THRESHOLD * 2.5)
+                    current_align_thresh = ALIGN_THRESHOLD if current_alt > 0.5 else (ALIGN_THRESHOLD * 2.5)
                     is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                     
                     # --- LOGGING (Inside the While) ---
@@ -423,7 +423,7 @@ async def run():
                             cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.08 and cruise_altitude_reached:
+        if current_alt < 0.06 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
              try: await drone.offboard.stop()
