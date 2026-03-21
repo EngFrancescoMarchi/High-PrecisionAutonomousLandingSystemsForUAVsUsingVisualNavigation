@@ -15,7 +15,7 @@ import threading
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 5.5  # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 90    # Pixel tolerance to start descent
+ALIGN_THRESHOLD = 95    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
@@ -325,15 +325,29 @@ async def run():
                 #Damper is the scale of the calculated force, 
                 # in this case we will use 40% of calculated, avoid shaking
                     # Gain Scheduling
-                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.3, 1.0)
+                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.25, 1.0)
                     max_speed_xy = np.clip(current_alt * 0.8, 0.4, 1.4)
 
-                    # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
+                    ## --- CALCOLO DEL MARGINE DI ANTICIPO (Forward Biasing) ---
+                    # Quanti "secondi" o "frazioni di secondo" vogliamo anticipare il target?
+                    anticipo_gain = 0.2  
+
+                    # Spostiamo il centro ideale nella direzione della velocità del marker
+                    target_x_offset = est_vx * anticipo_gain
+                    target_y_offset = est_vy * anticipo_gain
+
+                    # L'errore per l'allineamento finale non è più verso lo (0,0), ma verso il punto di anticipo
+                    err_x_anticipato = est_x - target_x_offset
+                    err_y_anticipato = est_y - target_y_offset
+
+                    # --- VERIFICA ALLINEAMENTO PER TOUCHDOWN ---
                     cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1.5, 2.5, 2.5])
                     current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
-                    is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
+
+                    # Ora il drone si considera "allineato" quando si trova nella zona di anticipo
+                    is_aligned = (abs(err_x_anticipato) < current_align_thresh and abs(err_y_anticipato) < current_align_thresh)
                     # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                    if abs(est_x) < 25 and abs(est_y) < 25:
+                    if abs(err_x_anticipato) < 25 and abs(err_y_anticipato) < 25:
                         ff_gain = 0.0
                     elif current_alt < 1.15:
                         ff_gain = 0.0020
