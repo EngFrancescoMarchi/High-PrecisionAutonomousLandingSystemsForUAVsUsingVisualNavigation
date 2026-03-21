@@ -3,9 +3,6 @@ import cv2
 import numpy as np
 import time
 import asyncio
-import threading
-import matplotlib.pyplot as plt
-from plot_results import plot_results
 from mavsdk import System
 from mavsdk.offboard import (OffboardError, VelocityBodyYawspeed) 
 import threading
@@ -15,7 +12,7 @@ import threading
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 5.5  # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 95    # Pixel tolerance to start descent
+ALIGN_THRESHOLD = 90    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
@@ -57,7 +54,7 @@ class LandingKalmanFilter:
         self.F = np.array([[1, dt, 0, 0], [0, 1, 0, 0], [0, 0, 1, dt], [0, 0, 0, 1]])
         self.H = np.array([[1, 0, 0, 0], [0, 0, 1, 0]])
         self.Q = np.eye(4) * 0.02
-        self.R = np.eye(2) * 20.0  
+        self.R = np.eye(2) * 15.0  
         self.P = np.eye(4) * 1.0
 
     def predict(self):
@@ -75,11 +72,12 @@ class LandingKalmanFilter:
 # --- VISION CALLBACK ---
 shared_buffer = SharedBuffer()
 
+# --- THE NEW OPTICAL BRAIN (SEPARATE THREAD) ---
 class CameraThread(threading.Thread):
     def __init__(self, buffer):
         super().__init__()
         self.buffer = buffer
-        self.daemon = False 
+        self.daemon = True # The thread dies when you press Ctrl+C
         self.running = True
 
     def run(self):
@@ -102,12 +100,7 @@ class CameraThread(threading.Thread):
             self.running = False
             return
 
-        # --- SETUP REGISTRAZIONE VIDEO ---
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        # Usiamo FREQ (100.0) per far combaciare i frame salvati con i tuoi 100Hz
-        out = cv2.VideoWriter('flight_vision_log.mp4', fourcc, 30, (CAM_W, CAM_H))
-        print(f"[Vision] Rec started: saving on 'flight_vision_log.mp4' a {30} FPS")
-        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {30}fps")
+        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
 
         while self.running:
             ret, frame = cap.read() # This line BLOCKS, but since it's in a thread, MAVSDK is safe!
@@ -151,19 +144,15 @@ class CameraThread(threading.Thread):
                     
                     cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
 
-            # --- SCRITTURA DEL FRAME NEL VIDEO ---
-            # Salviamo frame_display, così nel video finale vedrai i contorni ArUco e il pallino rosso!
-            out.write(frame_display)
-
             # Write to shared buffer (ZOH)
             self.buffer.write(cx, cy, frame_display)
             
         cap.release()
-        out.release() # --- CHIUSURA SICURA DEL FILE MP4 ---
-        print("[Vision] Camera turned off e video salvato correttamente.")
+        print("[Vision] Camera turned off.")
 
     def stop(self):
         self.running = False
+
 # --- TELEMETRY BACKGROUND ---
 current_alt = 0.0
 current_battery = 100.0  # Initialize battery percentage
@@ -223,7 +212,7 @@ async def run():
     # --- INT ---
     integ_x = 0.0
     integ_y = 0.0
-    integ_max = 500.0 # Anti-Windup Limit
+    integ_max = 1000.0 # Anti-Windup Limit
 
     # Arming
     # async for health in drone.telemetry.health():
@@ -325,40 +314,26 @@ async def run():
                 #Damper is the scale of the calculated force, 
                 # in this case we will use 40% of calculated, avoid shaking
                     # Gain Scheduling
-                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.25, 1.0)
-                    max_speed_xy = np.clip(current_alt * 0.8, 0.4, 1.4)
+                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
+                    max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
 
-                    ## --- CALCOLO DEL MARGINE DI ANTICIPO (Forward Biasing) ---
-                    # Quanti "secondi" o "frazioni di secondo" vogliamo anticipare il target?
-                    anticipo_gain = 0.2  
-
-                    # Spostiamo il centro ideale nella direzione della velocità del marker
-                    target_x_offset = est_vx * anticipo_gain
-                    target_y_offset = est_vy * anticipo_gain
-
-                    # L'errore per l'allineamento finale non è più verso lo (0,0), ma verso il punto di anticipo
-                    err_x_anticipato = est_x - target_x_offset
-                    err_y_anticipato = est_y - target_y_offset
-
-                    # --- VERIFICA ALLINEAMENTO PER TOUCHDOWN ---
-                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1.5, 2.5, 2.5])
+                    # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
+                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 2.5, 2.5])
                     current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
-
-                    # Ora il drone si considera "allineato" quando si trova nella zona di anticipo
-                    is_aligned = (abs(err_x_anticipato) < current_align_thresh and abs(err_y_anticipato) < current_align_thresh)
+                    is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                     # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                    if abs(err_x_anticipato) < 25 and abs(err_y_anticipato) < 25:
-                        ff_gain = 0.0
-                    elif current_alt < 1.15:
-                        ff_gain = 0.0020
-                    else:
-                        ff_gain = 0.0035
+                    i_dampener = np.clip((current_alt - 0.2) / 1.0, 0.3, 1.0)
                 
+                    # L'errore viene moltiplicato per il dampener prima di essere sommato.
+                    # In questo modo, vicino a terra smette di accumulare nuovi errori, 
+                    # ma preserva perfettamente il valore totale raggiunto.
+                    integ_x += (est_x * DT) * i_dampener
+                    integ_y += (est_y * DT) * i_dampener
                         # Anti-Windup standard
                     integ_x = np.clip(integ_x, -integ_max, integ_max)
                     integ_y = np.clip(integ_y, -integ_max, integ_max)
                     # 3. Feed-Forward Gain (Velocity Estimate)
-                    ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0.0003, 0.002)
+                    ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0, 0.002)
  
 
                     # 4. Total PID
@@ -391,7 +366,7 @@ async def run():
                     log_data['target_visible'].append(1 if target_visible else 0)
                     log_data['battery'].append(current_battery)
                     if is_aligned:
-                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.6, 0.7])
+                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.2, 0.5])
                     else:
                         # Corrective hovering
                         cmd_z = 0.0 
@@ -444,13 +419,13 @@ async def run():
                             cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.08 and cruise_altitude_reached and is_aligned:
+        if current_alt < 0.06 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
              try: await drone.offboard.stop()
              except: pass
-             await drone.action.kill()
-             #await drone.action.land()
+             #await drone.action.kill()
+             await drone.action.land()
              break
 
         # --- D. COMMAND ---
@@ -476,12 +451,11 @@ if __name__ == "__main__":
         # Now we check if log_data actually has data before plotting
         if 'time' in log_data and len(log_data['time']) > 0:
             print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
-            plot_results(log_data)
+            #plot_results(log_data)
         else:
             print("Nessun dato registrato da plottare.")
             
         print("Cleaning and closing...")        
         if cam_thread is not None:
-            cam_thread.stop()   # 1. Ferma il loop while nel thread
-            cam_thread.join()   # 2. Aspetta che il thread chiami out.release()
-            print("Chiusura pulita dei thread completata.")
+            cam_thread.stop()  # Stop the camera thread      
+          # This forces the closure of hanging threads of MAVSDK/OpenCV
