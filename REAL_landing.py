@@ -3,6 +3,9 @@ import cv2
 import numpy as np
 import time
 import asyncio
+import threading
+import matplotlib.pyplot as plt
+from plot_results import plot_results
 from mavsdk import System
 from mavsdk.offboard import (OffboardError, VelocityBodyYawspeed) 
 import threading
@@ -72,7 +75,6 @@ class LandingKalmanFilter:
 # --- VISION CALLBACK ---
 shared_buffer = SharedBuffer()
 
-# --- THE NEW OPTICAL BRAIN (SEPARATE THREAD) ---
 class CameraThread(threading.Thread):
     def __init__(self, buffer):
         super().__init__()
@@ -99,6 +101,12 @@ class CameraThread(threading.Thread):
             print("[Vision] CRITICAL ERROR: Camera not found!")
             self.running = False
             return
+
+        # --- SETUP REGISTRAZIONE VIDEO ---
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # Usiamo FREQ (100.0) per far combaciare i frame salvati con i tuoi 100Hz
+        out = cv2.VideoWriter('flight_vision_log.mp4', fourcc, FREQ, (CAM_W, CAM_H))
+        print(f"[Vision] Rec started: saving on 'flight_vision_log.mp4' a {FREQ} FPS")
 
         print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
 
@@ -144,15 +152,19 @@ class CameraThread(threading.Thread):
                     
                     cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
 
+            # --- SCRITTURA DEL FRAME NEL VIDEO ---
+            # Salviamo frame_display, così nel video finale vedrai i contorni ArUco e il pallino rosso!
+            out.write(frame_display)
+
             # Write to shared buffer (ZOH)
             self.buffer.write(cx, cy, frame_display)
             
         cap.release()
-        print("[Vision] Camera turned off.")
+        out.release() # --- CHIUSURA SICURA DEL FILE MP4 ---
+        print("[Vision] Camera turned off e video salvato correttamente.")
 
     def stop(self):
         self.running = False
-
 # --- TELEMETRY BACKGROUND ---
 current_alt = 0.0
 current_battery = 100.0  # Initialize battery percentage
@@ -451,7 +463,7 @@ if __name__ == "__main__":
         # Now we check if log_data actually has data before plotting
         if 'time' in log_data and len(log_data['time']) > 0:
             print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
-            #plot_results(log_data)
+            plot_results(log_data)
         else:
             print("Nessun dato registrato da plottare.")
             
