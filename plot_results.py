@@ -43,7 +43,7 @@ def plot_results(data):
     # Salva e Mostra
     plt.savefig('mission_log.png')
     print(">>> Grafico salvato come 'mission_log.png' <<<")
-    plt.show()
+    #plt.show()
 
 # E ALLA FINE DELLO SCRIPT, CHIAMA:
 # plot_results(log_data)
