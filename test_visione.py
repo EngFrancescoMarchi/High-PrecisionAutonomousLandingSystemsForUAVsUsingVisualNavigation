@@ -37,6 +37,7 @@ shared_buffer = SharedBuffer()
 stop_thread = False
 
 # --- THREAD DELLA VIDEOCAMERA ---
+# --- THREAD DELLA VIDEOCAMERA ---
 def vision_thread_func():
     global stop_thread
     print("Inizializzazione telecamera fisica USB in modalità HEADLESS...")
@@ -48,16 +49,21 @@ def vision_thread_func():
     cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
     cap.set(cv2.CAP_PROP_EXPOSURE, 100)
+    
     if not cap.isOpened():
         print("ERRORE CRITICO: Impossibile aprire la telecamera. Cavo USB collegato?")
         stop_thread = True
         return
 
+    # --- SETUP REGISTRAZIONE VIDEO ---
+    # Creiamo il writer per salvare in formato MP4 a 30 FPS
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter('log_visione.mp4', fourcc, 30.0, (CAM_W, CAM_H))
+    print("Registrazione video avviata: salvataggio su 'log_visione.mp4'")
+
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     parameters = cv2.aruco.DetectorParameters()
     detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
-
-    prev_time = time.time()
 
     while not stop_thread:
         ret, frame = cap.read()
@@ -71,6 +77,9 @@ def vision_thread_func():
         cx, cy = None, None
 
         if ids is not None:
+            # Disegniamo i bordi rossi/verdi attorno all'ArUco sul frame
+            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+            
             ids_list = ids.flatten().tolist()
             idx = -1
             
@@ -82,19 +91,14 @@ def vision_thread_func():
             if idx != -1:
                 c = corners[idx][0]
                 
-                # --- CALCOLO VERO CENTRO PROIETTIVO (Dal tuo codice) ---
+                # --- CALCOLO VERO CENTRO PROIETTIVO ---
                 p0, p1, p2, p3 = c[0], c[1], c[2], c[3]
-                
-                A1 = p2[1] - p0[1]
-                B1 = p0[0] - p2[0]
+                A1, B1 = p2[1] - p0[1], p0[0] - p2[0]
                 C1 = A1 * p0[0] + B1 * p0[1]
-                
-                A2 = p3[1] - p1[1]
-                B2 = p1[0] - p3[0]
+                A2, B2 = p3[1] - p1[1], p1[0] - p3[0]
                 C2 = A2 * p1[0] + B2 * p1[1]
                 
                 det = A1 * B2 - A2 * B1
-                
                 if det != 0:
                     true_cx = (B2 * C1 - B1 * C2) / det
                     true_cy = (A1 * C2 - A2 * C1) / det
@@ -103,12 +107,27 @@ def vision_thread_func():
                 
                 cx = int(true_cx) - CENTER_X
                 cy = int(true_cy) - CENTER_Y
+                
+                # Disegniamo un pallino blu esattamente al centro calcolato
+                cv2.circle(frame, (int(true_cx), int(true_cy)), 5, (255, 0, 0), -1)
 
-        # Scriviamo nel buffer indipendente dal fatto che ci sia o meno il target
+        # Scriviamo i dati nel buffer per il loop di controllo
         shared_buffer.write(cx, cy)
 
+        # --- OUTPUT VIDEO ---
+        # Opzione 1: Salva il frame nel file video (sicuro via SSH)
+        out.write(frame)
+        
+        # Opzione 2: Visualizzazione Live. 
+        # DECOMMENTA queste due righe SOLO se hai un monitor collegato direttamente al drone
+        # cv2.imshow("Live Vision Feedback", frame)
+        # cv2.waitKey(1)
+
+    # --- PULIZIA FINALE ---
     cap.release()
-    print("Thread visione terminato.")
+    out.release() # Chiudiamo il file MP4 per renderlo leggibile
+    cv2.destroyAllWindows()
+    print("Thread visione terminato. Video salvato.")
 
 # --- MAIN LOOP (Simula il loop di controllo) ---
 def main():
