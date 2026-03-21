@@ -79,7 +79,7 @@ class CameraThread(threading.Thread):
     def __init__(self, buffer):
         super().__init__()
         self.buffer = buffer
-        self.daemon = True # The thread dies when you press Ctrl+C
+        self.daemon = False 
         self.running = True
 
     def run(self):
@@ -105,10 +105,9 @@ class CameraThread(threading.Thread):
         # --- SETUP REGISTRAZIONE VIDEO ---
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         # Usiamo FREQ (100.0) per far combaciare i frame salvati con i tuoi 100Hz
-        out = cv2.VideoWriter('flight_vision_log.mp4', fourcc, FREQ, (CAM_W, CAM_H))
-        print(f"[Vision] Rec started: saving on 'flight_vision_log.mp4' a {FREQ} FPS")
-
-        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
+        out = cv2.VideoWriter('flight_vision_log.mp4', fourcc, 30, (CAM_W, CAM_H))
+        print(f"[Vision] Rec started: saving on 'flight_vision_log.mp4' a {30} FPS")
+        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {30}fps")
 
         while self.running:
             ret, frame = cap.read() # This line BLOCKS, but since it's in a thread, MAVSDK is safe!
@@ -431,7 +430,7 @@ async def run():
                             cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.04 and cruise_altitude_reached:
+        if current_alt < 0.08 and cruise_altitude_reached and is_aligned:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
              try: await drone.offboard.stop()
@@ -469,5 +468,6 @@ if __name__ == "__main__":
             
         print("Cleaning and closing...")        
         if cam_thread is not None:
-            cam_thread.stop()  # Stop the camera thread      
-          # This forces the closure of hanging threads of MAVSDK/OpenCV
+            cam_thread.stop()   # 1. Ferma il loop while nel thread
+            cam_thread.join()   # 2. Aspetta che il thread chiami out.release()
+            print("Chiusura pulita dei thread completata.")
