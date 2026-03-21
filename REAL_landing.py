@@ -14,7 +14,7 @@ import threading
 
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
-TARGET_ALTITUDE = 5.0  # Target altitude for initial hover before descent (meters)
+TARGET_ALTITUDE = 5.5  # Target altitude for initial hover before descent (meters)
 ALIGN_THRESHOLD = 90    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
@@ -57,7 +57,7 @@ class LandingKalmanFilter:
         self.F = np.array([[1, dt, 0, 0], [0, 1, 0, 0], [0, 0, 1, dt], [0, 0, 0, 1]])
         self.H = np.array([[1, 0, 0, 0], [0, 0, 1, 0]])
         self.Q = np.eye(4) * 0.02
-        self.R = np.eye(2) * 15.0  
+        self.R = np.eye(2) * 20.0  
         self.P = np.eye(4) * 1.0
 
     def predict(self):
@@ -223,7 +223,7 @@ async def run():
     # --- INT ---
     integ_x = 0.0
     integ_y = 0.0
-    integ_max = 1000.0 # Anti-Windup Limit
+    integ_max = 500.0 # Anti-Windup Limit
 
     # Arming
     # async for health in drone.telemetry.health():
@@ -325,26 +325,26 @@ async def run():
                 #Damper is the scale of the calculated force, 
                 # in this case we will use 40% of calculated, avoid shaking
                     # Gain Scheduling
-                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
-                    max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
+                    dampener = np.clip((current_alt - 0.5) / 1.2, 0.3, 1.0)
+                    max_speed_xy = np.clip(current_alt * 0.8, 0.4, 1.4)
 
                     # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
-                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 2.5, 2.5])
+                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1.5, 2.5, 2.5])
                     current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
                     is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                     # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                    i_dampener = np.clip((current_alt - 0.2) / 1.0, 0.3, 1.0)
+                    if abs(est_x) < 25 and abs(est_y) < 25:
+                        ff_gain = 0.0
+                    elif current_alt < 1.15:
+                        ff_gain = 0.0020
+                    else:
+                        ff_gain = 0.0035
                 
-                    # L'errore viene moltiplicato per il dampener prima di essere sommato.
-                    # In questo modo, vicino a terra smette di accumulare nuovi errori, 
-                    # ma preserva perfettamente il valore totale raggiunto.
-                    integ_x += (est_x * DT) * i_dampener
-                    integ_y += (est_y * DT) * i_dampener
                         # Anti-Windup standard
                     integ_x = np.clip(integ_x, -integ_max, integ_max)
                     integ_y = np.clip(integ_y, -integ_max, integ_max)
                     # 3. Feed-Forward Gain (Velocity Estimate)
-                    ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0, 0.002)
+                    ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0.0003, 0.002)
  
 
                     # 4. Total PID
@@ -377,7 +377,7 @@ async def run():
                     log_data['target_visible'].append(1 if target_visible else 0)
                     log_data['battery'].append(current_battery)
                     if is_aligned:
-                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.2, 0.5])
+                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.6, 0.7])
                     else:
                         # Corrective hovering
                         cmd_z = 0.0 
