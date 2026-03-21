@@ -11,7 +11,7 @@ import threading
 
 FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
 DT = 1.0 / FREQ        
-TARGET_ALTITUDE = 5.5  # Target altitude for initial hover before descent (meters)
+TARGET_ALTITUDE = 5.0  # Target altitude for initial hover before descent (meters)
 ALIGN_THRESHOLD = 90    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
@@ -419,13 +419,13 @@ async def run():
                             cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.06 and cruise_altitude_reached:
+        if current_alt < 0.04 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
              try: await drone.offboard.stop()
              except: pass
-             #await drone.action.kill()
-             await drone.action.land()
+             await drone.action.kill()
+             #await drone.action.land()
              break
 
         # --- D. COMMAND ---
