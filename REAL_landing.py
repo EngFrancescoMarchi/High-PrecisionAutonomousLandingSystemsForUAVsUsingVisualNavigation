@@ -77,7 +77,7 @@ class CameraThread(threading.Thread):
     def __init__(self, buffer):
         super().__init__()
         self.buffer = buffer
-        self.daemon = True # The thread dies when you press Ctrl+C
+        self.daemon = False
         self.running = True
 
     def run(self):
@@ -101,7 +101,10 @@ class CameraThread(threading.Thread):
             return
 
         print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
-
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter('log_landing.mp4', fourcc, FREQ, (CAM_W, CAM_H))
+        print(f"[Vision] Registrazione video avviata: salvataggio su 'log_landing.mp4'")
+        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
         while self.running:
             ret, frame = cap.read() # This line BLOCKS, but since it's in a thread, MAVSDK is safe!
             if not ret or frame is None:
@@ -145,9 +148,10 @@ class CameraThread(threading.Thread):
                     cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
 
             # Write to shared buffer (ZOH)
+            out.write(frame_display)
             self.buffer.write(cx, cy, frame_display)
-            
         cap.release()
+        out.release()
         print("[Vision] Camera turned off.")
 
     def stop(self):
@@ -189,11 +193,6 @@ async def run():
     
     # Wait for initial telemetry data
     await asyncio.sleep(2)
-    print(f"Initial battery level: {current_battery:.1f}%")
-    if current_battery < 30.0:
-        print("Battery too low for safe operation. Aborting mission.")
-        cam_thread.stop()
-        return
     # PID Gains (30Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
     KP_Y, KD_Y = 0.0012, 0.003
@@ -458,4 +457,5 @@ if __name__ == "__main__":
         print("Cleaning and closing...")        
         if cam_thread is not None:
             cam_thread.stop()  # Stop the camera thread      
+            cam_thread.join()
           # This forces the closure of hanging threads of MAVSDK/OpenCV
