@@ -278,7 +278,7 @@ async def run():
 
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 # Calcoliamo PRIMA la soglia a imbuto per usarla in tutta la logica successiva.
-                cone_multiplier = np.interp(current_alt, [0.4, 2.0, TARGET_ALTITUDE], [1, 2.5, 1.0])
+                cone_multiplier = np.interp(current_alt, [1.1, 1.3], [2.5, 1.0])
                 current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
 
@@ -286,7 +286,7 @@ async def run():
                 # L'integrale si adatta alla soglia di allineamento con un margine extra del 20%.
                 # Impedisce lo stallo a mezz'aria permettendo all'integrale di caricarsi durante i riallineamenti!
                 # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                i_dampener = np.clip((current_alt - 0.2) / 1.2, 0.3, 1.0)
+                i_dampener = np.clip((current_alt - 0.2) / 1.0, 0.3, 1.0)
                 
                 # L'errore viene moltiplicato per il dampener prima di essere sommato.
                 # In questo modo, vicino a terra smette di accumulare nuovi errori, 
@@ -299,7 +299,7 @@ async def run():
                 integ_y = np.clip(integ_y, -integ_max, integ_max)
                 
                 # 3. Feed-Forward Gain (Velocity Estimate)
-                ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0, 0.002)
+                ff_gain = np.interp(current_alt, [1.15, 2.0], [0.0020, 0.0035])
 
                 # 4. Total PID
                 # Y Axis (Roll)
@@ -386,7 +386,7 @@ async def run():
                         cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.2 and cruise_altitude_reached:
+        if current_alt < 0.37 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
              try: await drone.offboard.stop()
