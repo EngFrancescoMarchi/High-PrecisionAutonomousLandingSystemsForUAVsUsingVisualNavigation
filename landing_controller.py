@@ -251,7 +251,7 @@ async def run():
                 cruise_altitude_reached = True
                 last_seen_time = time.time() # Reset timer vista
             else:
-                cmd_z = -1.5
+                cmd_z = -1.0
                 if measurement is not None: # Preventive centering
                      cmd_y = (est_x * KP_X)
                      cmd_x = -((est_y * KP_Y))
@@ -386,7 +386,7 @@ async def run():
                         cmd_z = 0.0  # Maintain altitude if already high
 
         # --- C. TOUCHDOWN ---
-        if current_alt < 0.37 and cruise_altitude_reached:
+        if current_alt < 0.2 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
              try: await drone.offboard.stop()
