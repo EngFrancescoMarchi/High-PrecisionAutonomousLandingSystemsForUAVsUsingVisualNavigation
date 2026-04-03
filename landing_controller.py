@@ -278,7 +278,7 @@ async def run():
 
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 # Calcoliamo PRIMA la soglia a imbuto per usarla in tutta la logica successiva.
-                cone_multiplier = np.interp(current_alt, [1.1, 1.3], [2.5, 1.0])
+                cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 2.5, 2.5])
                 current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
 
