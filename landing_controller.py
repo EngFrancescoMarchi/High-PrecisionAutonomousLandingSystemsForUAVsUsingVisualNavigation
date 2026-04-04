@@ -449,11 +449,7 @@ if __name__ == "__main__":
         print(f"Errore imprevisto: {e}")
     finally:
         # Now we check if log_data actually has data before plotting
-        if 'time' in log_data and len(log_data['time']) > 0:
-<<<<<<< HEAD
-            if 'time' in log_data and len(log_data['time']) > 0:
-=======
->>>>>>> d13d38bac72b5e49f5248c891c754382c16ee65c
+        if 'time' in log_data and len(log_data['time']) > 0:    
             import pandas as pd
             import time
             
