@@ -134,7 +134,44 @@ def vision_callback(msg):
         shared_buffer.write(cx, cy, frame_display) 
     except Exception:
         pass
+def calculate_flight_stats(log_data):
+    # Convertiamo in array numpy
+    pos_x = np.array(log_data['pos_x_est'])
+    pos_y = np.array(log_data['pos_y_est'])
+    times = np.array(log_data['time'])
+    alts  = np.array(log_data['alt'])
 
+    # --- 1. CALCOLO TEMPO DI DISCESA PURO ---
+    # Trova l'altitudine massima raggiunta (il picco a fine decollo)
+    picco_alt = np.max(alts)
+    
+    # Trova tutti gli indici in cui il drone si trovava vicino al picco (es. entro 10 cm).
+    # Questo ci serve per ignorare la fase di "hovering" ad alta quota.
+    indici_hovering = np.where(alts >= picco_alt - 0.10)[0]
+    
+    # L'ultimo di questi indici è il momento esatto in cui inizia la discesa inarrestabile
+    idx_inizio_discesa = indici_hovering[-1]
+    
+    tempo_inizio_discesa = times[idx_inizio_discesa]
+    tempo_touchdown = times[-1]
+    
+    tempo_discesa_reale = tempo_touchdown - tempo_inizio_discesa
+
+    # --- 2. CALCOLO ERRORI FINALI (TOUCHDOWN) ---
+    ultimo_err_x = pos_x[-1]
+    ultimo_err_y = pos_y[-1]
+
+    # --- 3. STAMPA A SCHERMO ---
+    print("\n" + "="*40)
+    print(" STATISTICHE DI ATTERRAGGIO (DISCESA PURA) ")
+    print("="*40)
+    print(f"Altitudine di partenza discesa: {alts[idx_inizio_discesa]:.2f} m")
+    print(f"Tempo di decollo/hovering:      {tempo_inizio_discesa:.2f} s")
+    print(f"TEMPO DI DISCESA PURO:          {tempo_discesa_reale:.2f} s")
+    print("-" * 40)
+    print(f"Touchdown Err X:                {ultimo_err_x:.2f} px")
+    print(f"Touchdown Err Y:                {ultimo_err_y:.2f} px")
+    print("="*40 + "\n")
 # --- TELEMETRY BACKGROUND ---
 current_alt = 0.0
 async def telemetry_loop(drone):
@@ -225,8 +262,8 @@ async def run():
         est_y, est_vy = est_state[2][0], est_state[3][0]
         
         # --- Parallax Correction ---
-        CAMERA_OFFSET_Y = 0.05   # Camera forward of COM 
-        CAMERA_OFFSET_Z = 0.15   # Camera lower than COM 
+        CAMERA_OFFSET_Y = 0.04   # Camera forward of COM 
+        CAMERA_OFFSET_Z = 0.16   # Camera lower than COM 
         FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. If 640x480 use ~550)
 
         # 1. Calculate Effective Camera Altitude
@@ -273,12 +310,11 @@ async def run():
             #Damper is the scale of the calculated force, 
             # in this case we will use 40% of calculated, avoid shaking
                 # Gain Scheduling
-                dampener = np.clip((current_alt - 0.5) / 1.2, 0.40, 1)
+                dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
                 max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
-
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 # Calcoliamo PRIMA la soglia a imbuto per usarla in tutta la logica successiva.
-                cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 2.5, 2.5])
+                cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1.5, 1.5, 1])
                 current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
 
@@ -333,7 +369,7 @@ async def run():
                 log_data['vel_y_cmd'].append(cmd_y)
                 log_data['target_visible'].append(1 if target_visible else 0)
                 if is_aligned:
-                    cmd_z = np.interp(current_alt, [0.25, 1.5], [0.2, 0.5])
+                    cmd_z = np.interp(current_alt, [0.25, 1.5], [0.5, 0.8])
                 else:
                     # Corrective hovering
                     cmd_z = 0.0 
@@ -416,6 +452,19 @@ if __name__ == "__main__":
         if 'time' in log_data and len(log_data['time']) > 0:
             print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
             plot_results(log_data)
+            ultimo_alt = log_data['alt'][-1]
+            ultimo_err_x = log_data['pos_x_est'][-1]
+            ultimo_err_y = log_data['pos_y_est'][-1]
+            tempo_totale = log_data['time'][-1]
+            
+            print("\n" + "="*40)
+            print(" STATISTICHE AL TOUCHDOWN ")
+            print("="*40)
+            print(f"Tempo di volo totale:  {tempo_totale:.2f} s")
+            print(f"Altitudine finale:     {ultimo_alt:.2f} m")
+            print(f"Errore X finale:       {ultimo_err_x:.2f} px")
+            print(f"Errore Y finale:       {ultimo_err_y:.2f} px")
+            print("="*40 + "\n")
         else:
             print("Nessun dato registrato da plottare.")
             

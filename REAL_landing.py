@@ -274,7 +274,7 @@ async def run():
         # 3. Application
         #If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
         est_x = est_x
-        est_y = est_y + expected_pixel_offset
+        est_y = est_y
         
         # --- B. CONTROL ---
         cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
@@ -365,7 +365,7 @@ async def run():
                     log_data['target_visible'].append(1 if target_visible else 0)
                     log_data['battery'].append(current_battery)
                     if is_aligned:
-                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.2, 0.5])
+                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.5, 0.7])
                     else:
                         # Corrective hovering
                         cmd_z = 0.0 
