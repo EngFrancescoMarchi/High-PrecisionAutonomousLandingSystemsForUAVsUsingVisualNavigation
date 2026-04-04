@@ -450,20 +450,20 @@ if __name__ == "__main__":
     finally:
         # Now we check if log_data actually has data before plotting
         if 'time' in log_data and len(log_data['time']) > 0:
-            print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
-            plot_results(log_data)
-            ultimo_alt = log_data['alt'][-1]
-            ultimo_err_x = log_data['pos_x_est'][-1]
-            ultimo_err_y = log_data['pos_y_est'][-1]
-            tempo_totale = log_data['time'][-1]
+            import pandas as pd
+            import time
+            
+            # Crea un nome file unico usando l'orario di sistema
+            timestamp = int(time.time())
+            nome_file = f"log_volo_{timestamp}.csv"
+            
+            # Salva i dati in formato CSV
+            df = pd.DataFrame(log_data)
+            df.to_csv(nome_file, index=False)
             
             print("\n" + "="*40)
-            print(" STATISTICHE AL TOUCHDOWN ")
-            print("="*40)
-            print(f"Tempo di volo totale:  {tempo_totale:.2f} s")
-            print(f"Altitudine finale:     {ultimo_alt:.2f} m")
-            print(f"Errore X finale:       {ultimo_err_x:.2f} px")
-            print(f"Errore Y finale:       {ultimo_err_y:.2f} px")
+            print(f" VOLO COMPLETATO - DATI SALVATI IN: ")
+            print(f" {nome_file}")
             print("="*40 + "\n")
         else:
             print("Nessun dato registrato da plottare.")
