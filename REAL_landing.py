@@ -9,17 +9,17 @@ import threading
 #import matplotlib.pyplot as plt
 #from plot_results import plot_results
 
-FREQ = 100.0             #upadating at 30Hz for better performance with HD stream
+FREQ = 100.0             # Updating at 100Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 5.5  # Target altitude for initial hover before descent (meters)
-ALIGN_THRESHOLD = 90    # Pixel tolerance to start descent
+ALIGN_THRESHOLD = 110    # Pixel tolerance to start descent
 
-# Camera Params (gz_x500_vision standard + HD)
+# Camera Parameters (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
 aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 parameters = cv2.aruco.DetectorParameters()
 detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
-# --- ZOH as buffer ---
+# --- Zero-Order Hold Buffer ---
 class SharedBuffer:
     def __init__(self):
         self.measurement = None 
@@ -46,7 +46,7 @@ class SharedBuffer:
             self.new_data = False
             return data, frame, is_fresh
 
-# --- KALMAN FILTER ---
+# --- Kalman Filter ---
 class LandingKalmanFilter:
     def __init__(self, dt):
         self.dt = dt
@@ -69,10 +69,10 @@ class LandingKalmanFilter:
         self.x = self.x + (K @ y)
         self.P = (np.eye(4) - (K @ self.H)) @ self.P
 
-# --- VISION CALLBACK ---
+# --- Vision Callback ---
 shared_buffer = SharedBuffer()
 
-# --- THE NEW OPTICAL BRAIN (SEPARATE THREAD) ---
+# --- Vision Processing Thread ---
 class CameraThread(threading.Thread):
     def __init__(self, buffer):
         super().__init__()
@@ -106,7 +106,7 @@ class CameraThread(threading.Thread):
         print(f"[Vision] Registrazione video avviata: salvataggio su 'log_landing.mp4'")
         print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
         while self.running:
-            ret, frame = cap.read() # This line BLOCKS, but since it's in a thread, MAVSDK is safe!
+            ret, frame = cap.read() # This line blocks, but since it's in a thread, MAVSDK is safe!
             if not ret or frame is None:
                 continue
             
@@ -147,7 +147,7 @@ class CameraThread(threading.Thread):
                     
                     cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
 
-            # Write to shared buffer (ZOH)
+            # Write to shared buffer (Zero-Order Hold)
             out.write(frame_display)
             self.buffer.write(cx, cy, frame_display)
         cap.release()
@@ -157,7 +157,7 @@ class CameraThread(threading.Thread):
     def stop(self):
         self.running = False
 
-# --- TELEMETRY BACKGROUND ---
+# --- Telemetry Background Task ---
 current_alt = 0.0
 current_battery = 100.0  # Initialize battery percentage
 low_battery = False
@@ -172,7 +172,7 @@ async def telemetry_loop(drone):
             low_battery = True
 log_data = {}
 cam_thread = None
-# --- MAIN LOOP ---
+# --- Main Loop ---
 async def run():
     global current_alt, log_data, cam_thread
     drone = System()
@@ -193,14 +193,14 @@ async def run():
     
     # Wait for initial telemetry data
     await asyncio.sleep(2)
-    # PID Gains (30Hz + HD)
+    # PID Gains (100Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
     KP_Y, KD_Y = 0.0012, 0.003
-    KI = 0.0004   # <--- Integral Gain 
+    KI = 0.0005   # Integral Gain 
     
     cruise_altitude_reached = False 
     
-    # --- Loop over the place to find target (SEARCH MODE) ---
+    # --- Search Mode to Find Target ---
     search_active = False
     last_seen_time = time.time()
     search_start_time = 0
@@ -208,12 +208,12 @@ async def run():
     search_leg_duration = 2.0 
     base_search_speed = 1.2  
     
-    # --- INT ---
+    # --- Integral Terms ---
     integ_x = 0.0
     integ_y = 0.0
     integ_max = 1000.0 # Anti-Windup Limit
 
-    # Arming
+    # Arming Sequence
     # async for health in drone.telemetry.health():
     async for health in drone.telemetry.health():
         if health.is_global_position_ok and health.is_local_position_ok and health.is_home_position_ok:
@@ -234,7 +234,7 @@ async def run():
     except OffboardError: return
 
     next_wake_time = time.time() + DT
-    # --- DATA LOGGING SETUP ---
+    # --- Data Logging Setup ---
     log_data = {
         'time': [],
         'alt': [],
@@ -260,9 +260,9 @@ async def run():
         est_y, est_vy = est_state[2][0], est_state[3][0]
         
         # --- Parallax Correction ---
-        CAMERA_OFFSET_Y = 0.05   # Camera backward of COM 
-        CAMERA_OFFSET_Z = 0.15   # Camera lower than COM 
-        FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. If 640x480 use ~550)
+        CAMERA_OFFSET_Y = 0.05   # Camera offset backward from Center of Mass 
+        CAMERA_OFFSET_Z = 0.15   # Camera offset downward from Center of Mass 
+        FOCAL_LENGTH    = 550.0 # Focal length in pixels (for 720p/1080p; for 640x480 use ~550)
 
         # 1. Calculation of effective altitude for parallax correction
         # If the camera is below the COM, the effective altitude for parallax is lower.
@@ -271,12 +271,12 @@ async def run():
         # 2. Offset pixel to meter conversion (parallax)
         expected_pixel_offset = (CAMERA_OFFSET_Y * FOCAL_LENGTH) / cam_alt
         
-        # 3. Application
-        #If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
+        # 3. Application of correction
+        # If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
         est_x = est_x
-        est_y = est_y
+        est_y = est_y + expected_pixel_offset
         
-        # --- B. CONTROL ---
+        # --- Control Section ---
         cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
         
         # Emergency check for low battery
@@ -284,7 +284,7 @@ async def run():
             cmd_z = 0.5  # Emergency descent
         else:
         
-            # STATE 1: Takeoff
+            # State 1: Takeoff
             if not cruise_altitude_reached:
                 if current_alt >= TARGET_ALTITUDE - 0.5:
                     print("--- ALTITUDE REACHED ---")
@@ -296,65 +296,62 @@ async def run():
                         cmd_y = (est_x * KP_X)
                         cmd_x = -((est_y * KP_Y))
 
-            # STATE 2: descent + search
+            # State 2: Descent and Search
             else:
                 # Check if we have a recent sighting of the target (within the last 1.5 seconds)
                 target_visible = (time.time() - last_seen_time) < 1.5
 
                 # --- 2A. Target Tracking ---
                 if target_visible:
-                    # Reset Search
+                    # Reset Search Mode
                     if search_active:
                         print(">>> TARGET LOCKED! STOP RESEARCH <<<")
                         search_active = False
                         search_leg_index = 0
                         # Reset Integral on finding to avoid jerks
                         integ_x, integ_y = 0.0, 0.0
-                #Damper is the scale of the calculated force, 
-                # in this case we will use 40% of calculated, avoid shaking
+                # Damper scales the calculated force; here we use 40% to avoid shaking
                     # Gain Scheduling
                     dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
                     max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
-
+                    MAX_FF = 0.0035
+                    err_dist = np.hypot(est_x, est_y)
+                    spatial_multiplier = np.clip((err_dist - 50.0) / 85.0, 0.0, 1.0)
+                    spatial_ff_gain = MAX_FF * spatial_multiplier
                     # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
-                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 2.5, 2.5])
+                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 1.25, 1.5])
                     current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
                     is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
-                    # --- Cutting Integral last meter (FREEZE LOGIC) ---
-                    i_dampener = np.clip((current_alt - 0.2) / 1.0, 0.3, 1.0)
-                
-                    # L'errore viene moltiplicato per il dampener prima di essere sommato.
-                    # In questo modo, vicino a terra smette di accumulare nuovi errori, 
-                    # ma preserva perfettamente il valore totale raggiunto.
+                    # --- Freeze Integral in Last Meter ---
+                    i_dampener = np.clip((current_alt - 1.0) / 2.0, 0.3, 1.0)
+                    if current_alt < 0.8:
+                        i_dampener = 0.0
+                    # The error is multiplied by the dampener before being added. This way, near the ground it stops accumulating new errors, but preserves the total value reached perfectly.
                     integ_x += (est_x * DT) * i_dampener
                     integ_y += (est_y * DT) * i_dampener
-                        # Anti-Windup standard
+                        # Standard Anti-Windup
                     integ_x = np.clip(integ_x, -integ_max, integ_max)
                     integ_y = np.clip(integ_y, -integ_max, integ_max)
-                    # 3. Feed-Forward Gain (Velocity Estimate)
-                    ff_gain=np.clip(0.002 * (current_alt / TARGET_ALTITUDE), 0, 0.002)
- 
-
-                    # 4. Total PID
+                    # 4. Total PID Calculation
                     # Y Axis (Roll)
                     cmd_y = (est_x * KP_X * dampener) + \
                             (est_vx * KD_X * dampener) + \
                             (integ_x * KI) + \
-                            (est_vx * ff_gain)
+                            (est_vx * spatial_ff_gain)
                     
                     # X Axis (Pitch)
                     cmd_x = -((est_y * KP_Y * dampener) + \
                             (est_vy * KD_Y * dampener) + \
                             (integ_y * KI) + \
-                            (est_vy * (ff_gain)))
+                            (est_vy * spatial_ff_gain))
                     
-                    # --- END PID ---
-    # In the landing zone we cannot assure all the pixel as before, so we will set a threshold
+                    # --- End PID Calculation ---
+    # In the landing zone, we cannot assure all pixels as before, so we set a threshold
                     
                     # Clamping
                     cmd_x = np.clip(cmd_x, -max_speed_xy, max_speed_xy)
                     cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
-                    # --- LOGGING (Inside the While) ---
+                    # --- Logging (Inside the Loop) ---
                     current_log_time = time.time() - start_log_time
                     log_data['time'].append(current_log_time)
                     log_data['alt'].append(current_alt)
@@ -365,14 +362,14 @@ async def run():
                     log_data['target_visible'].append(1 if target_visible else 0)
                     log_data['battery'].append(current_battery)
                     if is_aligned:
-                        cmd_z = np.interp(current_alt, [0.25, 1.5], [0.5, 0.7])
+                        cmd_z = np.interp(current_alt, [0.35, 1.5], [0.45, 0.8])
                     else:
                         # Corrective hovering
                         cmd_z = 0.0 
 
-                # --- 2B. TARGET LOST:recognition ---
+                # --- 2B. Target Lost: Recognition ---
                 else:
-                    # 1. Reset of I
+                    # 1. Reset Integral Terms
                     integ_x, integ_y = 0.0, 0.0
                     
                     time_since_loss = time.time() - last_seen_time
@@ -393,7 +390,7 @@ async def run():
                         
                         dt_search = time.time() - search_start_time
 
-                        # Spiral Management (unchanged)
+                        # Spiral Search Management
                         if dt_search > search_leg_duration:
                             search_leg_index += 1
                             search_start_time = time.time()
@@ -408,7 +405,7 @@ async def run():
                         elif direction == 2: cmd_x, cmd_y = -spd, 0.0
                         elif direction == 3: cmd_x, cmd_y = 0.0, -spd
                         
-                        # --- THE CRUCIAL MODIFICATION: ASCENT ---
+                        # --- Crucial Modification: Ascent During Search ---
                         # If we lost target, we might be too low to see it again. To avoid getting stuck in a blind spot, we will command a slow ascent until we reach a certain ceiling where we can search effectively.
                         SEARCH_CEILING = 5.0
                         
@@ -417,7 +414,7 @@ async def run():
                         else:
                             cmd_z = 0.0  # Maintain altitude if already high
 
-        # --- C. TOUCHDOWN ---
+        # --- Touchdown ---
         if current_alt < 0.2 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
@@ -427,13 +424,13 @@ async def run():
              await drone.action.land()
              break
 
-        # --- D. COMMAND ---
+        # --- Send Commands ---
         if low_battery:
             cmd_x, cmd_y = 0.0, 0.0
             cmd_z = 0.5  # Force emergency descent
         await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, cmd_z, 0.0))
 
-        # --- E. TIMING ---
+        # --- Timing Control ---
         sleep_time = next_wake_time - time.time()
         if sleep_time > 0: await asyncio.sleep(sleep_time)
         next_wake_time += DT

@@ -20,7 +20,7 @@ except ImportError:
 
 FREQ = 100.0             #
 DT = 1.0 / FREQ        
-TARGET_ALTITUDE = 5.5   # Target altitude for initial hover before descent (meters)
+TARGET_ALTITUDE = 5.0  # Target altitude for initial hover before descent (meters)
 ALIGN_THRESHOLD = 110    # Pixel tolerance to start descent
 
 # Camera Params (gz_x500_vision standard + HD)
@@ -108,12 +108,12 @@ def vision_callback(msg):
                 # --- TRUE PROJECTIVE CENTER CALCULATION (Diagonal Intersection) ---
                 p0, p1, p2, p3 = c[0], c[1], c[2], c[3]
                 
-                # Retta 1 (Diagonale da p0 a p2)
+                # Line 1 (Diagonal from p0 to p2)
                 A1 = p2[1] - p0[1]
                 B1 = p0[0] - p2[0]
                 C1 = A1 * p0[0] + B1 * p0[1]
                 
-                # Retta 2 (Diagonale da p1 a p3)
+                # Line 2 (Diagonal from p1 to p3)
                 A2 = p3[1] - p1[1]
                 B2 = p1[0] - p3[0]
                 C2 = A2 * p1[0] + B2 * p1[1]
@@ -135,42 +135,42 @@ def vision_callback(msg):
     except Exception:
         pass
 def calculate_flight_stats(log_data):
-    # Convertiamo in array numpy
+    # Convert to numpy arrays
     pos_x = np.array(log_data['pos_x_est'])
     pos_y = np.array(log_data['pos_y_est'])
     times = np.array(log_data['time'])
     alts  = np.array(log_data['alt'])
 
-    # --- 1. CALCOLO TEMPO DI DISCESA PURO ---
-    # Trova l'altitudine massima raggiunta (il picco a fine decollo)
-    picco_alt = np.max(alts)
+    # --- 1. PURE DESCENT TIME CALCULATION ---
+    # Find the maximum altitude reached (the peak at the end of takeoff)
+    peak_alt = np.max(alts)
     
-    # Trova tutti gli indici in cui il drone si trovava vicino al picco (es. entro 10 cm).
-    # Questo ci serve per ignorare la fase di "hovering" ad alta quota.
-    indici_hovering = np.where(alts >= picco_alt - 0.10)[0]
+    # Find all indices where the drone was near the peak (e.g., within 10 cm).
+    # This helps us ignore the "hovering" phase at high altitude.
+    hovering_indices = np.where(alts >= peak_alt - 0.10)[0]
     
-    # L'ultimo di questi indici è il momento esatto in cui inizia la discesa inarrestabile
-    idx_inizio_discesa = indici_hovering[-1]
+    # The last of these indices is the exact moment when unstoppable descent begins
+    idx_descent_start = hovering_indices[-1]
     
-    tempo_inizio_discesa = times[idx_inizio_discesa]
-    tempo_touchdown = times[-1]
+    descent_start_time = times[idx_descent_start]
+    touchdown_time = times[-1]
     
-    tempo_discesa_reale = tempo_touchdown - tempo_inizio_discesa
+    actual_descent_time = touchdown_time - descent_start_time
 
-    # --- 2. CALCOLO ERRORI FINALI (TOUCHDOWN) ---
-    ultimo_err_x = pos_x[-1]
-    ultimo_err_y = pos_y[-1]
+    # --- 2. FINAL ERRORS CALCULATION (TOUCHDOWN) ---
+    final_err_x = pos_x[-1]
+    final_err_y = pos_y[-1]
 
-    # --- 3. STAMPA A SCHERMO ---
+    # --- 3. PRINT TO SCREEN ---
     print("\n" + "="*40)
-    print(" STATISTICHE DI ATTERRAGGIO (DISCESA PURA) ")
+    print(" LANDING STATISTICS (PURE DESCENT) ")
     print("="*40)
-    print(f"Altitudine di partenza discesa: {alts[idx_inizio_discesa]:.2f} m")
-    print(f"Tempo di decollo/hovering:      {tempo_inizio_discesa:.2f} s")
-    print(f"TEMPO DI DISCESA PURO:          {tempo_discesa_reale:.2f} s")
+    print(f"Descent start altitude: {alts[idx_descent_start]:.2f} m")
+    print(f"Takeoff/hovering time:  {descent_start_time:.2f} s")
+    print(f"PURE DESCENT TIME:       {actual_descent_time:.2f} s")
     print("-" * 40)
-    print(f"Touchdown Err X:                {ultimo_err_x:.2f} px")
-    print(f"Touchdown Err Y:                {ultimo_err_y:.2f} px")
+    print(f"Touchdown Err X:                {final_err_x:.2f} px")
+    print(f"Touchdown Err Y:                {final_err_y:.2f} px")
     print("="*40 + "\n")
 # --- TELEMETRY BACKGROUND ---
 current_alt = 0.0
@@ -194,14 +194,14 @@ async def run():
     kf = LandingKalmanFilter(DT)
     asyncio.create_task(telemetry_loop(drone))
 
-    # PID Gains (30Hz + HD)
+    # PID Gains (100Hz + HD)
     KP_X, KD_X = 0.0012, 0.003
     KP_Y, KD_Y = 0.0012, 0.003
-    KI = 0.0005   # <--- NEW: Integral Gain
+    KI = 0.0005   # Integral Gain
     
     cruise_altitude_reached = False 
     
-    # --- Loop over the place to find target (SEARCH MODE) ---
+    # --- Search Mode to Find Target ---
     search_active = False
     last_seen_time = time.time()
     search_start_time = 0
@@ -209,12 +209,12 @@ async def run():
     search_leg_duration = 2.0 
     base_search_speed = 1.2  
     
-    # --- INT ---
+    # --- Integral Terms ---
     integ_x = 0.0
     integ_y = 0.0
     integ_max = 1000.0 # Anti-Windup Limit
     
-    # Takeoff
+    # Takeoff Sequence
     print("-- Arming & Takeoff")
     # async for health in drone.telemetry.health():
     async for health in drone.telemetry.health():
@@ -235,15 +235,15 @@ async def run():
     except OffboardError: return
 
     next_wake_time = time.time() + DT
-    # --- DATA LOGGING SETUP ---
+    # --- Data Logging Setup ---
     log_data = {
         'time': [],
         'alt': [],
-        'pos_x_est': [],  # Posizione stimata dal Kalman
+        'pos_x_est': [],  # Estimated position from Kalman
         'pos_y_est': [],
-        'vel_x_cmd': [],  # Comando inviato
+        'vel_x_cmd': [],  # Sent command
         'vel_y_cmd': [],
-        'target_visible': [] # 1 se visto, 0 se perso
+        'target_visible': [] # 1 if seen, 0 if lost
     }
     start_log_time = time.time()
     while True:
@@ -262,9 +262,9 @@ async def run():
         est_y, est_vy = est_state[2][0], est_state[3][0]
         
         # --- Parallax Correction ---
-        CAMERA_OFFSET_Y = 0.04   # Camera forward of COM 
-        CAMERA_OFFSET_Z = 0.16   # Camera lower than COM 
-        FOCAL_LENGTH    = 550.0 # Pixel ( 720p/1080p. If 640x480 use ~550)
+        CAMERA_OFFSET_Y = 0.04   # Camera offset forward from Center of Mass 
+        CAMERA_OFFSET_Z = 0.16   # Camera offset downward from Center of Mass 
+        FOCAL_LENGTH    = 550.0 # Focal length in pixels (for 720p/1080p; for 640x480 use ~550)
 
         # 1. Calculate Effective Camera Altitude
         # If the camera is below the COM, the effective altitude for parallax is lower.
@@ -273,74 +273,73 @@ async def run():
         # 2. Offset pixel to meter conversion (parallax)
         expected_pixel_offset = (CAMERA_OFFSET_Y * FOCAL_LENGTH) / cam_alt
         
-        # 3. Application
-        #If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
+        # 3. Application of correction
+        # If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
         est_x = est_x 
         est_y = est_y + expected_pixel_offset # No correction needed on Y for forward offset
         
-        # --- B. CONTROL ---
+        # --- Control Section ---
         cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
         
-        # STATE 1: Takeoff
+        # State 1: Takeoff
         if not cruise_altitude_reached:
             if current_alt >= TARGET_ALTITUDE - 0.5:
-                print("--- QUOTA RAGGIUNTA ---")
+                print("--- ALTITUDE REACHED ---")
                 cruise_altitude_reached = True
-                last_seen_time = time.time() # Reset timer vista
+                last_seen_time = time.time() # Reset sight timer
             else:
                 cmd_z = -1.0
                 if measurement is not None: # Preventive centering
                      cmd_y = (est_x * KP_X)
                      cmd_x = -((est_y * KP_Y))
 
-        # STATE 2: descent + search
+        # State 2: Descent and Search
         else:
-            # Check if we have the target NOW
+            # Check if we have a recent sighting of the target (within the last 1.5 seconds)
             target_visible = (time.time() - last_seen_time) < 1.5
 
             # --- 2A. Target Tracking ---
             if target_visible:
-                # Reset Search
+                # Reset Search Mode
                 if search_active:
                     print(">>> TARGET LOCKED! STOP RESEARCH <<<")
                     search_active = False
                     search_leg_index = 0
                     # Reset Integral on finding to avoid jerks
                     integ_x, integ_y = 0.0, 0.0
-            #Damper is the scale of the calculated force, 
-            # in this case we will use 40% of calculated, avoid shaking
+            # Damper scales the calculated force; here we use 40% to avoid shaking
                 # Gain Scheduling
                 err_dist = np.hypot(est_x, est_y)
                 dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
                 max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
-                # Calcoliamo PRIMA la soglia a imbuto per usarla in tutta la logica successiva.
+                # We calculate the funnel threshold FIRST to use it in all subsequent logic.
                 cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 1.25, 1.5])
                 current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
                 is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                 MAX_FF = 0.0035
-                # --- 2. INTEGRAL ZONE (Dinamica) ---
-                # L'integrale si adatta alla soglia di allineamento con un margine extra del 20%.
-                # Impedisce lo stallo a mezz'aria permettendo all'integrale di caricarsi durante i riallineamenti!
-                # --- Cutting Integral last meter (FREEZE LOGIC) ---
+                # --- 2. INTEGRAL ZONE (Dynamic) ---
+                # The integral adapts to the alignment threshold with an extra 20% margin.
+                # Prevents stalling mid-air by allowing the integral to build up during realignments!
+                # --- Freeze Integral in Last Meter ---
                 i_dampener = np.clip((current_alt - 1) / 2, 0.3, 1.0)
                 spatial_multiplier = np.clip((err_dist - 50.0) / 85.0, 1.0, 0.0)
-                # L'errore viene moltiplicato per il dampener prima di essere sommato.
-                # In questo modo, vicino a terra smette di accumulare nuovi errori, 
-                # ma preserva perfettamente il valore totale raggiunto.
+                # The error is multiplied by the dampener before being added.
+                # This way, near the ground it stops accumulating new errors, 
+                # but preserves the total value reached perfectly.
                 if current_alt < 0.8:
                     i_dampener = 0.0
                 spatial_ff_gain = MAX_FF * spatial_multiplier
                 integ_x += (est_x * DT) * i_dampener
                 integ_y += (est_y * DT) * i_dampener
-                    # Anti-Windup standard
+                    # Standard Anti-Windup
                 integ_x = np.clip(integ_x, -integ_max, integ_max)
                 integ_y = np.clip(integ_y, -integ_max, integ_max)
                 
                 # 3. Feed-Forward Gain (Velocity Estimate)
                 
 
-                # 4. Total PID
+                # 4. Total PID Calculation
                 # Y Axis (Roll)
                 cmd_y = (est_x * KP_X * dampener) + \
                         (est_vx * KD_X * dampener) + \
@@ -353,8 +352,8 @@ async def run():
                           (integ_y * KI) + \
                           (est_vy * (spatial_ff_gain)))
                 
-                # --- END PID ---
-# In the landing zone we cannot assure all the pixel as before, so we will set a threshold
+                # --- End PID Calculation ---
+# In the landing zone, we cannot assure all pixels as before, so we set a threshold
                 
                 # Clamping
                 cmd_x = np.clip(cmd_x, -max_speed_xy, max_speed_xy)
@@ -362,7 +361,7 @@ async def run():
 
                 # Descent Management
                 
-                # --- LOGGING (Inside the While) ---
+                # --- Logging (Inside the Loop) ---
                 current_log_time = time.time() - start_log_time
                 log_data['time'].append(current_log_time)
                 log_data['alt'].append(current_alt)
@@ -377,14 +376,14 @@ async def run():
                     # Corrective hovering
                     cmd_z = 0.0 
 
-            # --- 2B. TARGET LOST:recognition ---
+            # --- 2B. Target Lost: Recognition ---
             else:
-                # 1. Reset of I
+                # 1. Reset Integral Terms
                 integ_x, integ_y = 0.0, 0.0
                 
                 time_since_loss = time.time() - last_seen_time
                 
-                # Phase 1: Wait (Anti-Glitch) - 1.5 seconds
+                # Phase 1: Wait (Anti-Glitch) - 3 seconds
                 if time_since_loss < 3:
                     cmd_x, cmd_y, cmd_z = 0.0, 0.0, 0.0
                     if time_since_loss > 1.5: # Print only after 1 second to not spam
@@ -396,11 +395,11 @@ async def run():
                         search_active = True
                         search_start_time = time.time()
                         search_leg_index = 0
-                        search_leg_duration = 1.5 # Spirale veloce
+                        search_leg_duration = 1.5 # Fast spiral
                     
                     dt_search = time.time() - search_start_time
 
-                    # Spiral Management (unchanged)
+                    # Spiral Search Management
                     if dt_search > search_leg_duration:
                         search_leg_index += 1
                         search_start_time = time.time()
@@ -415,7 +414,7 @@ async def run():
                     elif direction == 2: cmd_x, cmd_y = -spd, 0.0
                     elif direction == 3: cmd_x, cmd_y = 0.0, -spd
                     
-                    # --- THE CRUCIAL MODIFICATION: ASCENT ---
+                    # --- Crucial Modification: Ascent During Search ---
                     # If we lost target, we might be too low to see it again. To avoid getting stuck in a blind spot, we will command a slow ascent until we reach a certain ceiling where we can search effectively.
                     SEARCH_CEILING = 5.0
                     
@@ -424,7 +423,7 @@ async def run():
                     else:
                         cmd_z = 0.0  # Maintain altitude if already high
 
-        # --- C. TOUCHDOWN ---
+        # --- Touchdown ---
         if current_alt < 0.2 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
@@ -434,10 +433,10 @@ async def run():
              await drone.action.land()
              break
 
-        # --- D. COMMAND ---
+        # --- Send Commands ---
         await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, cmd_z, 0.0))
 
-        # --- E. TIMING ---
+        # --- Timing Control ---
         sleep_time = next_wake_time - time.time()
         if sleep_time > 0: await asyncio.sleep(sleep_time)
         next_wake_time += DT
@@ -447,30 +446,30 @@ if __name__ == "__main__":
     try:
         loop.run_until_complete(run())
     except KeyboardInterrupt:
-        print("\n!!! Interrotto da France (utente) !!!")
+        print("\n!!! Interrupted by user !!!")
     except Exception as e:
-        print(f"Errore imprevisto: {e}")
+        print(f"Unexpected error: {e}")
     finally:
         # Now we check if log_data actually has data before plotting
         if 'time' in log_data and len(log_data['time']) > 0:    
             import pandas as pd
             import time
             
-            # Crea un nome file unico usando l'orario di sistema
+            # Create a unique filename using system time
             timestamp = int(time.time())
-            nome_file = f"log_volo_{timestamp}.csv"
+            filename = f"log_volo_{timestamp}.csv"
             
-            # Salva i dati in formato CSV
+            # Save data in CSV format
             df = pd.DataFrame(log_data)
-            df.to_csv(nome_file, index=False)
+            df.to_csv(filename, index=False)
             
             print("\n" + "="*40)
-            print(f" VOLO COMPLETATO - DATI SALVATI IN: ")
-            print(f" {nome_file}")
+            print(f" FLIGHT COMPLETED - DATA SAVED IN: ")
+            print(f" {filename}")
             print("="*40 + "\n")
             plot_results(log_data)
         else:
-            print("Nessun dato registrato da plottare.")
+            print("No data recorded to plot.")
             
-        print("Pulizia e chiusura...")
+        print("Cleaning and closing...")
         # This forces the closure of hanging threads of MAVSDK/OpenCV

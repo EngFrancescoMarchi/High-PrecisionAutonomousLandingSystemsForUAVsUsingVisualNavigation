@@ -1,12 +1,12 @@
 import matplotlib.pyplot as plt
 import numpy as np
 def plot_results(data):
-    print(">>> GENERAZIONE GRAFICI IN CORSO... <<<")
+    print(">>> GENERATING GRAPHS IN PROGRESS... <<<")
     
-    # Crea una figura con 3 grafici impilati
+    # Create a figure with 3 stacked plots
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
     
-    # 1. Altitudine
+    # 1. Altitude
     ax1.plot(data['time'], data['alt'], 'b-', label='Altitude')
     ax1.axhline(y=0.0, color='k', linestyle='--', linewidth=1)
     ax1.set_ylabel('Altitude [m]')
@@ -14,7 +14,7 @@ def plot_results(data):
     ax1.grid(True)
     ax1.legend()
     
-    # 2. Errore di Posizione (Stima Kalman)
+    # 2. Position Error (Kalman Estimate)
     ax2.plot(data['time'], data['pos_x_est'], 'r-', label='Error X (Est)')
     ax2.plot(data['time'], data['pos_y_est'], 'g-', label='Error Y (Est)')
     ax2.axhline(y=0.0, color='k', linestyle='--', linewidth=1)
@@ -23,15 +23,15 @@ def plot_results(data):
     ax2.grid(True)
     ax2.legend()
     
-    # 3. Comandi di Velocità
+    # 3. Velocity Commands
     ax3.plot(data['time'], data['vel_x_cmd'], 'r--', label='Cmd Vel X')
     ax3.plot(data['time'], data['vel_y_cmd'], 'g--', label='Cmd Vel Y')
     
-    # Aggiungi indicatore di visibilità target (area grigia quando perso)
-    # Scaliamo per renderlo visibile
+    # Add target visibility indicator (gray area when lost)
+    # Scale to make it visible
     vis = np.array(data['target_visible'])
-    # Disegna sfondo rosso dove target persa
-    # (Logica un po' complessa per matplotlib veloce, facciamo semplice:)
+    # Draw red background where target is lost
+    # (A bit complex logic for fast matplotlib, let's keep it simple:)
     # ax3.fill_between(data['time'], -1, 1, where=(vis==0), color='red', alpha=0.1, label='Target Lost')
 
     ax3.set_ylabel('Velocity Cmd [m/s]')
@@ -40,10 +40,10 @@ def plot_results(data):
     ax3.grid(True)
     ax3.legend()
     
-    # Salva e Mostra
+    # Save and Show
     plt.savefig('mission_log.png')
-    print(">>> Grafico salvato come 'mission_log.png' <<<")
+    print(">>> Graph saved as 'mission_log.png' <<<")
     #plt.show()
 
-# E ALLA FINE DELLO SCRIPT, CHIAMA:
+# AND AT THE END OF THE SCRIPT, CALL:
 # plot_results(log_data)

@@ -3,19 +3,19 @@ import numpy as np
 import time
 import threading
 
-# Impostazioni Camera
+# Camera Settings
 CAM_W, CAM_H = 640, 480
 CENTER_X, CENTER_Y = CAM_W // 2, CAM_H // 2
-CONTROL_FREQ = 100.0  # Simuliamo la lettura a 100Hz del loop principale
+CONTROL_FREQ = 100.0  # Simulate reading at 100Hz from the main loop
 DT = 1.0 / CONTROL_FREQ
 
-# --- BUFFER CONDIVISO (Come nel main) ---
+# --- Shared Buffer (Like in main) ---
 class SharedBuffer:
     def __init__(self):
         self.measurement = None
         self.new_data = False
         self.last_receive_time = 0.0
-        self.lock = threading.Lock() # Aggiunto lock per sicurezza col vero multithreading
+        self.lock = threading.Lock() # Added lock for safety with real multithreading
 
     def write(self, u, v):
         with self.lock:
@@ -36,11 +36,11 @@ class SharedBuffer:
 shared_buffer = SharedBuffer()
 stop_thread = False
 
-# --- THREAD DELLA VIDEOCAMERA ---
-# --- THREAD DELLA VIDEOCAMERA ---
+# --- Camera Thread ---
+# --- Camera Thread ---
 def vision_thread_func():
     global stop_thread
-    print("Inizializzazione telecamera fisica USB in modalità HEADLESS...")
+    print("Initializing physical USB camera in HEADLESS mode...")
     cap = cv2.VideoCapture(0)
     
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
@@ -51,15 +51,15 @@ def vision_thread_func():
     cap.set(cv2.CAP_PROP_EXPOSURE, 100)
     
     if not cap.isOpened():
-        print("ERRORE CRITICO: Impossibile aprire la telecamera. Cavo USB collegato?")
+        print("CRITICAL ERROR: Unable to open camera. USB cable connected?")
         stop_thread = True
         return
 
-    # --- SETUP REGISTRAZIONE VIDEO ---
-    # Creiamo il writer per salvare in formato MP4 a 30 FPS
+    # --- Video Recording Setup ---
+    # Create the writer to save in MP4 format at 30 FPS
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter('log_visione.mp4', fourcc, 30.0, (CAM_W, CAM_H))
-    print("Registrazione video avviata: salvataggio su 'log_visione.mp4'")
+    print("Video recording started: saving to 'log_visione.mp4'")
 
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     parameters = cv2.aruco.DetectorParameters()
@@ -77,7 +77,7 @@ def vision_thread_func():
         cx, cy = None, None
 
         if ids is not None:
-            # Disegniamo i bordi rossi/verdi attorno all'ArUco sul frame
+            # Draw red/green borders around the ArUco on the frame
             cv2.aruco.drawDetectedMarkers(frame, corners, ids)
             
             ids_list = ids.flatten().tolist()
@@ -91,7 +91,7 @@ def vision_thread_func():
             if idx != -1:
                 c = corners[idx][0]
                 
-                # --- CALCOLO VERO CENTRO PROIETTIVO ---
+                # --- True Projective Center Calculation ---
                 p0, p1, p2, p3 = c[0], c[1], c[2], c[3]
                 A1, B1 = p2[1] - p0[1], p0[0] - p2[0]
                 C1 = A1 * p0[0] + B1 * p0[1]
@@ -108,39 +108,39 @@ def vision_thread_func():
                 cx = int(true_cx) - CENTER_X
                 cy = int(true_cy) - CENTER_Y
                 
-                # Disegniamo un pallino blu esattamente al centro calcolato
+                # Draw a blue dot exactly at the calculated center
                 cv2.circle(frame, (int(true_cx), int(true_cy)), 5, (255, 0, 0), -1)
 
-        # Scriviamo i dati nel buffer per il loop di controllo
+        # Write data to the buffer for the control loop
         shared_buffer.write(cx, cy)
 
-        # --- OUTPUT VIDEO ---
-        # Opzione 1: Salva il frame nel file video (sicuro via SSH)
+        # --- Video Output ---
+        # Option 1: Save the frame to video file (safe via SSH)
         out.write(frame)
         
-        # Opzione 2: Visualizzazione Live. 
-        # DECOMMENTA queste due righe SOLO se hai un monitor collegato direttamente al drone
+        # Option 2: Live Visualization. 
+        # UNCOMMENT these two lines ONLY if you have a monitor connected directly to the drone
         # cv2.imshow("Live Vision Feedback", frame)
         # cv2.waitKey(1)
 
-    # --- PULIZIA FINALE ---
+    # --- Final Cleanup ---
     cap.release()
-    out.release() # Chiudiamo il file MP4 per renderlo leggibile
+    out.release() # Close the MP4 file to make it readable
     cv2.destroyAllWindows()
-    print("Thread visione terminato. Video salvato.")
+    print("Vision thread terminated. Video saved.")
 
-# --- MAIN LOOP (Simula il loop di controllo) ---
+# --- Main Loop (Simulates the control loop) ---
 def main():
     global stop_thread
     
-    # Avvia il thread della fotocamera
+    # Start the camera thread
     vision_thread = threading.Thread(target=vision_thread_func)
     vision_thread.start()
 
-    print(f"--- TEST VISIONE MULTITHREAD AVVIATO ({CAM_W}x{CAM_H}) ---")
-    print(f"Lettura simulata a {CONTROL_FREQ} Hz. Premi Ctrl+C per uscire.")
+    print(f"--- MULTITHREAD VISION TEST STARTED ({CAM_W}x{CAM_H}) ---")
+    print(f"Simulated reading at {CONTROL_FREQ} Hz. Press Ctrl+C to exit.")
     
-    time.sleep(2) # Attendi che la telecamera si accenda
+    time.sleep(2) # Wait for the camera to turn on
 
     if stop_thread:
         return
@@ -151,33 +151,33 @@ def main():
 
     try:
         while True:
-            # Leggiamo dal buffer esattamente come fa il Kalman nel codice di volo
+            # Read from the buffer exactly like Kalman does in the flight code
             measurement, is_new = shared_buffer.read()
             
             if is_new:
-                read_count += 1 # Contiamo quanti frame freschi stiamo ricevendo realmente
+                read_count += 1 # Count how many fresh frames we are actually receiving
             
-            # Stampiamo a schermo solo ogni 10 cicli (5 volte al secondo) per non intasare il terminale SSH
+            # Print to screen only every 10 cycles (5 times per second) to not clog the SSH terminal
             loops += 1
             if loops % 10 == 0:
                 if measurement is not None:
-                    print(f"[Loop 50Hz] TARGET LOCKED | cx: {int(measurement[0][0]):4d}, cy: {int(measurement[1][0]):4d} | Nuovi Frame visti: {read_count}/10")
+                    print(f"[Loop 50Hz] TARGET LOCKED | cx: {int(measurement[0][0]):4d}, cy: {int(measurement[1][0]):4d} | New Frames seen: {read_count}/10")
                 else:
-                    print(f"[Loop 50Hz] TARGET LOST   | Nessun dato nel buffer          | Nuovi Frame visti: {read_count}/10")
-                read_count = 0 # Resetta il contatore delle letture fresche
+                    print(f"[Loop 50Hz] TARGET LOST   | No data in buffer          | New Frames seen: {read_count}/10")
+                read_count = 0 # Reset the fresh reads counter
 
-            # Sincronizzazione a 50Hz
+            # Synchronization at 50Hz
             sleep_time = next_wake_time - time.time()
             if sleep_time > 0:
                 time.sleep(sleep_time)
             next_wake_time += DT
 
     except KeyboardInterrupt:
-        print("\nTest interrotto manualmente da France.")
+        print("\nTest interrupted manually by user.")
     finally:
         stop_thread = True
         vision_thread.join()
-        print("Chiusura pulita completata.")
+        print("Clean shutdown completed.")
 
 if __name__ == "__main__":
     main()
