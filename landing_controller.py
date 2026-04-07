@@ -243,7 +243,12 @@ async def run():
         'pos_y_est': [],
         'vel_x_cmd': [],  # Sent command
         'vel_y_cmd': [],
-        'target_visible': [] # 1 if seen, 0 if lost
+        'target_visible': [], # 1 if seen, 0 if lost
+        'time': [],
+        'setpoint_x': [],   # Centro dell'immagine (obiettivo)
+        'raw_x': [],        # Lettura nuda e cruda di OpenCV
+        'filtered_x': [],   # Lettura dopo il tuo filtro
+        'cmd_y': []
     }
     start_log_time = time.time()
     while True:
@@ -363,13 +368,32 @@ async def run():
                 
                 # --- Logging (Inside the Loop) ---
                 current_log_time = time.time() - start_log_time
+                
+                # 1. Ricostruzione dei dati per il grafico (riportandoli in coordinate Pixel 0-640)
+                setpoint_pixel = CAM_W / 2
+                
+                # measurement[0][0] contiene l'errore 'cx' calcolato in vision_callback.
+                # Aggiungiamo il centro immagine per avere la coordinata pixel assoluta grezza.
+                raw_pixel_x = (measurement[0][0] + setpoint_pixel) if measurement is not None else np.nan
+                
+                # est_x contiene l'errore filtrato dal tuo LandingKalmanFilter.
+                # Aggiungiamo il centro immagine per avere la coordinata pixel assoluta filtrata.
+                filtered_pixel_x = est_x + setpoint_pixel
+
+                # 2. Salvataggio
                 log_data['time'].append(current_log_time)
                 log_data['alt'].append(current_alt)
-                log_data['pos_x_est'].append(est_x) # Or the raw error if you prefer
+                log_data['pos_x_est'].append(est_x) 
                 log_data['pos_y_est'].append(est_y)
                 log_data['vel_x_cmd'].append(cmd_x)
                 log_data['vel_y_cmd'].append(cmd_y)
                 log_data['target_visible'].append(1 if target_visible else 0)
+                
+                # 3. Dati specifici per il grafico di Tuning
+                log_data['setpoint_x'].append(setpoint_pixel)
+                log_data['raw_x'].append(raw_pixel_x)
+                log_data['filtered_x'].append(filtered_pixel_x)
+                log_data['cmd_y'].append(cmd_y)
                 if is_aligned:
                     cmd_z = np.interp(current_alt, [0.35, 1.5], [0.45, 0.8])
                 else:

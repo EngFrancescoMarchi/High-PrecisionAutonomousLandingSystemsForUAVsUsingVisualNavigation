@@ -1,3 +1,5 @@
+from turtle import pd
+
 import matplotlib.pyplot as plt
 import numpy as np
 def plot_results(data):
@@ -44,6 +46,35 @@ def plot_results(data):
     plt.savefig('mission_log.png')
     print(">>> Graph saved as 'mission_log.png' <<<")
     #plt.show()
-
+def plot_tuning_graph(log_data_dict):
+    df = pd.DataFrame(log_data_dict)
+        
+    # Crea la figura con stile accademico
+    plt.figure(figsize=(10, 6))
+    
+    # 1. Plot Setpoint (Linea tratteggiata rossa)
+    plt.plot(df['time'], df['setpoint_x'], 'r--', linewidth=2, label='Setpoint (Image Center)')
+    
+    # 2. Plot Misura Grezza (Linea sottile semi-trasparente)
+    plt.plot(df['time'], df['raw_x'], color='lightgray', linewidth=1.5, alpha=0.8, label='Raw ArUco Detection')
+    
+    # 3. Plot Misura Filtrata / Risposta (Linea spessa blu)
+    plt.plot(df['time'], df['filtered_x'], 'b-', linewidth=2, label='Filtered Position (Kalman/Low-Pass)')
+    
+    # Personalizzazione assi e titoli per LaTeX
+    plt.title('Filter Tuning: System Response along X-Axis', fontsize=14, fontweight='bold')
+    plt.xlabel('Time [s]', fontsize=12)
+    plt.ylabel('Pixel Coordinate [u]', fontsize=12)
+    
+    # Limiti asse Y (opzionale, per centrare meglio il grafico sulla risoluzione della camera)
+    plt.ylim(0, 640) 
+    
+    plt.legend(loc='best', fontsize=10)
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.tight_layout()
+    
+    # Salva il grafico ad alta risoluzione per la tesi
+    plt.savefig('tuning_response_x.pdf', format='pdf', dpi=300)
+    plt.show()
 # AND AT THE END OF THE SCRIPT, CALL:
 # plot_results(log_data)
