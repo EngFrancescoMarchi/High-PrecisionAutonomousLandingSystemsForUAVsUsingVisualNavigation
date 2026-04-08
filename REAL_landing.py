@@ -6,19 +6,45 @@ import asyncio
 from mavsdk import System
 from mavsdk.offboard import (OffboardError, VelocityBodyYawspeed) 
 import threading
-#import matplotlib.pyplot as plt
-#from plot_results import plot_results
-
+import csv          # <-- AGGIUNTO: per salvare CSV senza pandas/matplotlib
+import os           # <-- AGGIUNTO: per path management
+ 
 FREQ = 100.0             # Updating at 100Hz for better performance with HD stream
 DT = 1.0 / FREQ        
 TARGET_ALTITUDE = 5.5  # Target altitude for initial hover before descent (meters)
 ALIGN_THRESHOLD = 110    # Pixel tolerance to start descent
-
+ 
 # Camera Parameters (gz_x500_vision standard + HD)
 CAM_W, CAM_H = 640,480
 aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 parameters = cv2.aruco.DetectorParameters()
 detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
+ 
+# ===========================================================================
+#   FIX 1 - CSV SAVE FUNCTION (no matplotlib, no pandas, no crash risk)
+# ===========================================================================
+def save_csv(log_data, filename=None):
+    """
+    Salva log_data su CSV usando solo la libreria standard.
+    Nessun import di matplotlib/pandas => nessun rischio di crash.
+    """
+    if filename is None:
+        filename = f"log_volo_{int(time.time())}.csv"
+    
+    keys = list(log_data.keys())
+    n_rows = len(log_data[keys[0]])
+    
+    try:
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(keys)                       # header
+            for i in range(n_rows):
+                row = [log_data[k][i] for k in keys]
+                writer.writerow(row)
+        print(f"[CSV] Salvato: {filename} ({n_rows} righe)")
+    except Exception as e:
+        print(f"[CSV] ERRORE nel salvataggio: {e}")
+ 
 # --- Zero-Order Hold Buffer ---
 class SharedBuffer:
     def __init__(self):
@@ -27,7 +53,7 @@ class SharedBuffer:
         self.new_data = False
         self.last_receive_time = 0.0
         self.lock = threading.Lock()
-
+ 
     def write(self, u, v, frame):
         with self.lock:
             if u is not None and v is not None:
@@ -37,7 +63,7 @@ class SharedBuffer:
             self.frame = frame
             self.new_data = True
             self.last_receive_time = time.time()
-
+ 
     def read(self):
         with self.lock:
             data = self.measurement
@@ -45,7 +71,7 @@ class SharedBuffer:
             frame = self.frame
             self.new_data = False
             return data, frame, is_fresh
-
+ 
 # --- Kalman Filter ---
 class LandingKalmanFilter:
     def __init__(self, dt):
@@ -56,30 +82,32 @@ class LandingKalmanFilter:
         self.Q = np.eye(4) * 0.02
         self.R = np.eye(2) * 15.0  
         self.P = np.eye(4) * 1.0
-
+ 
     def predict(self):
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
         return self.x
-
+ 
     def update(self, z):
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
         self.x = self.x + (K @ y)
         self.P = (np.eye(4) - (K @ self.H)) @ self.P
-
+ 
 # --- Vision Callback ---
 shared_buffer = SharedBuffer()
-
-# --- Vision Processing Thread ---
+ 
+# ===========================================================================
+#   FIX 2 - CAMERA THREAD con video recording robusto
+# ===========================================================================
 class CameraThread(threading.Thread):
     def __init__(self, buffer):
         super().__init__()
         self.buffer = buffer
         self.daemon = False
         self.running = True
-
+ 
     def run(self):
         print("[Vision] Physical camera initialization...")
         cap = cv2.VideoCapture(0, cv2.CAP_V4L2) 
@@ -94,19 +122,37 @@ class CameraThread(threading.Thread):
         cap.set(cv2.CAP_PROP_BRIGHTNESS, 128)
         cap.set(cv2.CAP_PROP_CONTRAST, 128)
         cap.set(cv2.CAP_PROP_SATURATION, 128)
-
+ 
         if not cap.isOpened():
             print("[Vision] CRITICAL ERROR: Camera not found!")
             self.running = False
             return
-
-        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter('log_landing.mp4', fourcc, FREQ, (CAM_W, CAM_H))
-        print(f"[Vision] Registrazione video avviata: salvataggio su 'log_landing.mp4'")
-        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H} @ {FREQ}fps")
+ 
+        # -----------------------------------------------------------------
+        #  FIX VIDEO: Uso XVID/AVI invece di mp4v/mp4.
+        #  AVI e' un formato "append-friendly": ogni frame scritto va 
+        #  direttamente su disco. MP4 richiede il release() finale per 
+        #  scrivere l'header, e se il processo crasha perdi tutto.
+        # -----------------------------------------------------------------
+        VIDEO_FPS = 30.0   # FPS reali della camera USB (non FREQ=100)
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        video_filename = f"log_landing_{int(time.time())}.avi"
+        out = cv2.VideoWriter(video_filename, fourcc, VIDEO_FPS, (CAM_W, CAM_H))
+        
+        if not out.isOpened():
+            print(f"[Vision] WARNING: VideoWriter failed con XVID, provo MJPG...")
+            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+            video_filename = f"log_landing_{int(time.time())}.avi"
+            out = cv2.VideoWriter(video_filename, fourcc, VIDEO_FPS, (CAM_W, CAM_H))
+ 
+        print(f"[Vision] USB Webcam Ready: {CAM_W}x{CAM_H}")
+        print(f"[Vision] Video recording: {video_filename}")
+        
+        frame_count = 0
+        FLUSH_INTERVAL = int(VIDEO_FPS * 3)  # Flush ogni ~3 secondi
+        
         while self.running:
-            ret, frame = cap.read() # This line blocks, but since it's in a thread, MAVSDK is safe!
+            ret, frame = cap.read()
             if not ret or frame is None:
                 continue
             
@@ -114,14 +160,14 @@ class CameraThread(threading.Thread):
             gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
             corners, ids, _ = detector.detectMarkers(gray)
             cx, cy = None, None
-
+ 
             if ids is not None:
                 cv2.aruco.drawDetectedMarkers(frame_display, corners, ids)
                 ids_list = ids.flatten().tolist()
                 if 4 in ids_list: idx = ids_list.index(4)
                 elif 0 in ids_list: idx = ids_list.index(0)
                 else: idx = -1
-
+ 
                 if idx != -1:
                     c = corners[idx][0]
                     dyn_center_x = CAM_W // 2
@@ -146,17 +192,31 @@ class CameraThread(threading.Thread):
                     cy = int(true_cy) - dyn_center_y
                     
                     cv2.circle(frame_display, (dyn_center_x + cx, dyn_center_y + cy), 5, (0, 0, 255), -1)
-
-            # Write to shared buffer (Zero-Order Hold)
+ 
+            # Write video frame
             out.write(frame_display)
             self.buffer.write(cx, cy, frame_display)
+            frame_count += 1
+            
+            # -----------------------------------------------------------------
+            #  FIX VIDEO: Flush periodico - riapre il VideoWriter ogni ~3 sec.
+            #  In caso di crash, perdi al massimo 3 secondi di video.
+            # -----------------------------------------------------------------
+            if frame_count % FLUSH_INTERVAL == 0 and frame_count > 0:
+                out.release()
+                #out = cv2.VideoWriter(video_filename, fourcc, VIDEO_FPS, (CAM_W, CAM_H))
+                # Nota: questo sovrascrive il file, quindi il video contiene
+                # solo gli ultimi ~3 sec. Se vuoi mantenere tutto, usa segmenti:
+                video_filename = f"log_landing_seg{frame_count}.avi"
+                out = cv2.VideoWriter(video_filename, fourcc, VIDEO_FPS, (CAM_W, CAM_H))
+        
         cap.release()
         out.release()
-        print("[Vision] Camera turned off.")
-
+        print(f"[Vision] Camera spenta. Frame totali registrati: {frame_count}")
+ 
     def stop(self):
         self.running = False
-
+ 
 # --- Telemetry Background Task ---
 current_alt = 0.0
 current_battery = 100.0  # Initialize battery percentage
@@ -170,8 +230,10 @@ async def telemetry_loop(drone):
         if current_battery < 20.0 and not low_battery:
             print(f"WARNING: Low battery ({current_battery:.1f}%) - Initiating emergency landing!")
             low_battery = True
+ 
 log_data = {}
 cam_thread = None
+ 
 # --- Main Loop ---
 async def run():
     global current_alt, log_data, cam_thread
@@ -212,9 +274,8 @@ async def run():
     integ_x = 0.0
     integ_y = 0.0
     integ_max = 1000.0 # Anti-Windup Limit
-
+ 
     # Arming Sequence
-    # async for health in drone.telemetry.health():
     async for health in drone.telemetry.health():
         if health.is_global_position_ok and health.is_local_position_ok and health.is_home_position_ok:
             print("-- Check unlocked, global/local position and home position: OK")
@@ -232,18 +293,18 @@ async def run():
     await drone.offboard.set_velocity_body(VelocityBodyYawspeed(0,0,0,0))
     try: await drone.offboard.start()
     except OffboardError: return
-
+ 
     next_wake_time = time.time() + DT
     # --- Data Logging Setup ---
     log_data = {
         'time': [],
         'alt': [],
-        'pos_x_est': [],  #Estimated position (or error) at each timestep, useful for post-analysis of control performance. You can also log raw measurements if you prefer.
+        'pos_x_est': [],
         'pos_y_est': [],
         'vel_x_cmd': [],  
         'vel_y_cmd': [],
         'target_visible': [],
-        'battery': []  # Battery percentage
+        'battery': []
     }
     start_log_time = time.time()
     while True:
@@ -263,16 +324,14 @@ async def run():
         CAMERA_OFFSET_Y = 0.05   # Camera offset backward from Center of Mass 
         CAMERA_OFFSET_Z = 0.15   # Camera offset downward from Center of Mass 
         FOCAL_LENGTH    = 550.0 # Focal length in pixels (for 720p/1080p; for 640x480 use ~550)
-
+ 
         # 1. Calculation of effective altitude for parallax correction
-        # If the camera is below the COM, the effective altitude for parallax is lower.
         cam_alt = max(current_alt - CAMERA_OFFSET_Z, 1) 
         
         # 2. Offset pixel to meter conversion (parallax)
         expected_pixel_offset = (CAMERA_OFFSET_Y * FOCAL_LENGTH) / cam_alt
         
         # 3. Application of correction
-        # If the camera is forward of the COM, the target appears shifted in the opposite direction of the movement, so we subtract the expected pixel offset from the estimated position to get a more accurate error for control.
         est_x = est_x
         est_y = est_y + expected_pixel_offset
         
@@ -295,12 +354,12 @@ async def run():
                     if measurement is not None: # Preventing centering on noise during takeoff
                         cmd_y = (est_x * KP_X)
                         cmd_x = -((est_y * KP_Y))
-
+ 
             # State 2: Descent and Search
             else:
                 # Check if we have a recent sighting of the target (within the last 1.5 seconds)
                 target_visible = (time.time() - last_seen_time) < 1.5
-
+ 
                 # --- 2A. Target Tracking ---
                 if target_visible:
                     # Reset Search Mode
@@ -326,7 +385,6 @@ async def run():
                     i_dampener = np.clip((current_alt - 1.0) / 2.0, 0.3, 1.0)
                     if current_alt < 0.8:
                         i_dampener = 0.0
-                    # The error is multiplied by the dampener before being added. This way, near the ground it stops accumulating new errors, but preserves the total value reached perfectly.
                     integ_x += (est_x * DT) * i_dampener
                     integ_y += (est_y * DT) * i_dampener
                         # Standard Anti-Windup
@@ -346,27 +404,28 @@ async def run():
                             (est_vy * spatial_ff_gain))
                     
                     # --- End PID Calculation ---
-    # In the landing zone, we cannot assure all pixels as before, so we set a threshold
-                    
+ 
                     # Clamping
                     cmd_x = np.clip(cmd_x, -max_speed_xy, max_speed_xy)
                     cmd_y = np.clip(cmd_y, -max_speed_xy, max_speed_xy)
+ 
                     # --- Logging (Inside the Loop) ---
                     current_log_time = time.time() - start_log_time
                     log_data['time'].append(current_log_time)
                     log_data['alt'].append(current_alt)
-                    log_data['pos_x_est'].append(est_x) # Or the raw error if you prefer
+                    log_data['pos_x_est'].append(est_x)
                     log_data['pos_y_est'].append(est_y)
                     log_data['vel_x_cmd'].append(cmd_x)
                     log_data['vel_y_cmd'].append(cmd_y)
                     log_data['target_visible'].append(1 if target_visible else 0)
                     log_data['battery'].append(current_battery)
+ 
                     if is_aligned:
                         cmd_z = np.interp(current_alt, [0.35, 1.5], [0.45, 0.8])
                     else:
                         # Corrective hovering
                         cmd_z = 0.0 
-
+ 
                 # --- 2B. Target Lost: Recognition ---
                 else:
                     # 1. Reset Integral Terms
@@ -389,14 +448,14 @@ async def run():
                             search_leg_duration = 1.5 # Fast spiral
                         
                         dt_search = time.time() - search_start_time
-
+ 
                         # Spiral Search Management
                         if dt_search > search_leg_duration:
                             search_leg_index += 1
                             search_start_time = time.time()
                             if search_leg_index % 2 == 0:
                                 search_leg_duration += 1.0 
-
+ 
                         direction = search_leg_index % 4
                         spd = base_search_speed
                         
@@ -406,53 +465,53 @@ async def run():
                         elif direction == 3: cmd_x, cmd_y = 0.0, -spd
                         
                         # --- Crucial Modification: Ascent During Search ---
-                        # If we lost target, we might be too low to see it again. To avoid getting stuck in a blind spot, we will command a slow ascent until we reach a certain ceiling where we can search effectively.
                         SEARCH_CEILING = 5.0
                         
                         if current_alt < SEARCH_CEILING:
                             cmd_z = -1.0 # Go up to regain sight
                         else:
                             cmd_z = 0.0  # Maintain altitude if already high
-
+ 
         # --- Touchdown ---
         if current_alt < 0.2 and cruise_altitude_reached:
              print("--- TOUCHDOWN ---")
              await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, 0.5,0))
              try: await drone.offboard.stop()
              except: pass
-             #await drone.action.kill()
              await drone.action.land()
              break
-
+ 
         # --- Send Commands ---
         if low_battery:
             cmd_x, cmd_y = 0.0, 0.0
             cmd_z = 0.5  # Force emergency descent
         await drone.offboard.set_velocity_body(VelocityBodyYawspeed(cmd_x, cmd_y, cmd_z, 0.0))
-
+ 
         # --- Timing Control ---
         sleep_time = next_wake_time - time.time()
         if sleep_time > 0: await asyncio.sleep(sleep_time)
         next_wake_time += DT
-
+ 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(run())
     except KeyboardInterrupt:
-        print("\n!!! Interrotto da France (utente) !!!")
+        print("\n!!! Interrotto dall'utente !!!")
     except Exception as e:
         print(f"Errore imprevisto: {e}")
     finally:
-        # Now we check if log_data actually has data before plotting
+        # ==================================================================
+        #  FIX 1: Salva CSV in modo sicuro (no matplotlib, no crash)
+        # ==================================================================
         if 'time' in log_data and len(log_data['time']) > 0:
-            print(f"Salvataggio dati ({len(log_data['time'])} punti)...")
-            #plot_results(log_data)
+            print(f"[SAVE] Salvataggio dati ({len(log_data['time'])} punti)...")
+            save_csv(log_data)
         else:
-            print("Nessun dato registrato da plottare.")
+            print("[SAVE] Nessun dato registrato da salvare.")
             
         print("Cleaning and closing...")        
         if cam_thread is not None:
-            cam_thread.stop()  # Stop the camera thread      
-            cam_thread.join()
-          # This forces the closure of hanging threads of MAVSDK/OpenCV
+            cam_thread.stop()
+            cam_thread.join(timeout=5)  # Timeout per evitare hang infinito
+        
