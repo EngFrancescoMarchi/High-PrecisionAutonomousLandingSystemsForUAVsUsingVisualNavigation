@@ -212,7 +212,7 @@ async def run():
     # --- Integral Terms ---
     integ_x = 0.0
     integ_y = 0.0
-    integ_max = 1000.0 # Anti-Windup Limit
+    integ_max = 1500.0 # Anti-Windup Limit
     
     # Takeoff Sequence
     print("-- Arming & Takeoff")
