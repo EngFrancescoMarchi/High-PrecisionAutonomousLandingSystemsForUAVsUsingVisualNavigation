@@ -372,7 +372,7 @@ async def run():
                 # Damper scales the calculated force; here we use 40% to avoid shaking
                     # Gain Scheduling
                     dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
-                    max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
+                    max_speed_xy = np.clip(current_alt * 0.8, 0.1, 1.4)
                     MAX_FF = 0.0035
                     err_dist = np.hypot(est_x, est_y)
                     spatial_multiplier = np.clip((err_dist - 50.0) / 85.0, 0.0, 1.0)

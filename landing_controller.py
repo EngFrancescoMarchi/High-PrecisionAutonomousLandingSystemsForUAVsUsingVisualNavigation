@@ -316,7 +316,7 @@ async def run():
                 # Gain Scheduling
                 err_dist = np.hypot(est_x, est_y)
                 dampener = np.clip((current_alt - 0.5) / 1.2, 0.4, 1.0)
-                max_speed_xy = np.clip(current_alt * 0.8, 0.55, 1.4)
+                max_speed_xy = np.clip(current_alt * 0.8, 0.1, 1.4)
                 # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
                 # We calculate the funnel threshold FIRST to use it in all subsequent logic.
                 cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 1.25, 1.5])
