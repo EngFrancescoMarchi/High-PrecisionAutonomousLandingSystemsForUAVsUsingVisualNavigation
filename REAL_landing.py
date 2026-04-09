@@ -149,7 +149,7 @@ class CameraThread(threading.Thread):
         print(f"[Vision] Video recording: {video_filename}")
         
         frame_count = 0
-        FLUSH_INTERVAL = int(VIDEO_FPS * 3)  # Flush ogni ~3 secondi
+        FLUSH_INTERVAL = int(VIDEO_FPS * 5)  # Flush ogni ~5 secondi
         
         while self.running:
             ret, frame = cap.read()
@@ -375,10 +375,10 @@ async def run():
                     max_speed_xy = np.clip(current_alt * 0.8, 0.1, 1.4)
                     MAX_FF = 0.0035
                     err_dist = np.hypot(est_x, est_y)
-                    spatial_multiplier = np.clip((err_dist - 50.0) / 85.0, 0.0, 1.0)
+                    spatial_multiplier = np.clip((err_dist - 20.0) / 85.0, 0, 1.0)
                     spatial_ff_gain = MAX_FF * spatial_multiplier
                     # --- COMPLETE PID CALCULATION (P + I + D + FF) ---
-                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 1.25, 1.5])
+                    cone_multiplier = np.interp(current_alt, [0.7, 2.0, TARGET_ALTITUDE], [1, 1.5, 2])
                     current_align_thresh = ALIGN_THRESHOLD * cone_multiplier
                     is_aligned = (abs(est_x) < current_align_thresh and abs(est_y) < current_align_thresh)
                     # --- Freeze Integral in Last Meter ---
@@ -421,7 +421,7 @@ async def run():
                     log_data['battery'].append(current_battery)
  
                     if is_aligned:
-                        cmd_z = np.interp(current_alt, [0.35, 1.5], [0.45, 0.8])
+                        cmd_z = np.interp(current_alt, [0.35, 1.5], [0.45, 0.7])
                     else:
                         # Corrective hovering
                         cmd_z = 0.0 
