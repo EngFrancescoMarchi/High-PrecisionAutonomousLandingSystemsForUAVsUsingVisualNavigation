@@ -7,7 +7,7 @@ try:
     from gz.transport13 import Node
     from gz.msgs10.image_pb2 import Image
 except ImportError:
-    print("ERRORE: Librerie Gazebo non trovate nel path.")
+    print("ERROR: Gazebo libraries not found in path.")
     sys.exit(1)
 
 TOPIC_NAME = "/camera"
@@ -17,11 +17,11 @@ aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_TYPE)
 
 def cb(msg):
     try:
-        # 1.Image Conversion
+        # 1. Image Conversion
         width = msg.width
         height = msg.height
         
-        # Copy of files
+        # Copy of data
         img_buf = np.frombuffer(msg.data, dtype=np.uint8)
         
         # Reshape
@@ -33,7 +33,7 @@ def cb(msg):
         
         # Safe grayscale conversion
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = np.ascontiguousarray(gray) # DOPPIA SICUREZZA
+        gray = np.ascontiguousarray(gray) # DOUBLE SAFETY
         
         # 3. Detection of ArUco markers
         corners, ids, rejected = cv2.aruco.detectMarkers(gray, aruco_dict)
@@ -67,13 +67,13 @@ def cb(msg):
             sys.exit(0)
         
     except Exception as e:
-        print(f"Errore stream: {e}")
+        print(f"Stream error: {e}")
 
 def main():
-    print(f"--- VISION SYSTEM AVVIATO (SAFE MODE) ---")
+    print("--- VISION SYSTEM STARTED (SAFE MODE) ---")
     node = Node()
     if not node.subscribe(Image, TOPIC_NAME, cb):
-        print(f"Errore subscribe a {TOPIC_NAME}")
+        print(f"Error subscribing to {TOPIC_NAME}")
         return
 
     try:
