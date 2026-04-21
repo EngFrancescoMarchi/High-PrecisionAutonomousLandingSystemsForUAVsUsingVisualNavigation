@@ -1,4 +1,3 @@
-# Thesis
 # High-Precision Autonomous Landing System for UAVs
 
 This project implements a high-precision autonomous landing system for drones, based on computer vision (ArUco markers) and MAVLink protocol. The system is designed to operate on a Companion Computer (NVIDIA Jetson Nano) interfaced with a flight controller (Pixhawk) via serial telemetry and MAVSDK.
@@ -85,3 +84,9 @@ Linux Permissions: We freed the /dev/ttyTHS1 port from system processes (like nv
 
 4. `REAL_landing.py` (Hardware-Validated Autonomous Landing)
 Run the code.
+
+---
+
+## 📚 Citation
+
+If you use this code or any part of this project in your research or work, please cite the corresponding publication. This open-source implementation represents significant research and development effort, and proper attribution is requested to acknowledge the work invested in creating this autonomous landing system.
