@@ -41,7 +41,7 @@ The brain of the landing system. This script combines computer vision with fligh
 * **Parallax Correction:** Calculates the camera offset relative to the drone's center of mass to avoid misaligned landings.
 * **PID Controller:** Generates `cmd_x` and `cmd_y` velocities based on visual error, with dynamic gains (Gain Scheduling) that become more conservative as altitude decreases. Includes Anti-Windup logic for the integral action.
 * **Search Mode:** If the target is visually lost for more than 1.5 seconds, the drone initiates a spiral maneuver and climbs to a safe altitude (`SEARCH_CEILING`) to attempt visual reacquisition of the marker.
-* 
+
 ### 4. `REAL_landing.py` (Hardware-Validated Autonomous Landing)
 The production-ready landing script that integrates all previous components into a fully autonomous landing system tested and validated on physical hardware.
 * **Multi-Rate Control Loop:** Runs at 100 Hz for smooth command generation to the flight controller, while the vision subsystem operates independently at 30 FPS via a separate camera thread.
