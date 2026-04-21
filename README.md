@@ -41,7 +41,17 @@ The brain of the landing system. This script combines computer vision with fligh
 * **Parallax Correction:** Calculates the camera offset relative to the drone's center of mass to avoid misaligned landings.
 * **PID Controller:** Generates `cmd_x` and `cmd_y` velocities based on visual error, with dynamic gains (Gain Scheduling) that become more conservative as altitude decreases. Includes Anti-Windup logic for the integral action.
 * **Search Mode:** If the target is visually lost for more than 1.5 seconds, the drone initiates a spiral maneuver and climbs to a safe altitude (`SEARCH_CEILING`) to attempt visual reacquisition of the marker.
-
+* 
+### 4. `REAL_landing.py` (Hardware-Validated Autonomous Landing)
+The production-ready landing script that integrates all previous components into a fully autonomous landing system tested and validated on physical hardware.
+* **Multi-Rate Control Loop:** Runs at 100 Hz for smooth command generation to the flight controller, while the vision subsystem operates independently at 30 FPS via a separate camera thread.
+* **Advanced Kalman Filter:** Estimates drone position in pixel coordinates with Zero-Order Hold (ZOH) logic to gracefully handle frame drops and temporary target loss during fast descents.
+* **Robust Parallax Correction:** Dynamically compensates for camera offset relative to the drone's center of mass, ensuring pixel-to-meter conversion accuracy at all altitudes.
+* **Adaptive PID with Gain Scheduling:** Dynamically adjusts control gains based on altitude—aggressive far from ground, conservative near touchdown to prevent oscillations and overshooting.
+* **Intelligent Search Mode:** When target is lost for >1.5 seconds, the drone executes a square spiral search pattern while climbing to regain visual lock without crashing.
+* **Data Logging & Video Recording:** Continuous CSV logging of telemetry (position estimates, velocity commands, altitude, battery) and AVI video recording with periodic flushing to ensure data integrity even if the process crashes.
+* **Battery Monitoring:** Real-time battery level tracking with automatic emergency descent (<20% remaining) to prevent in-flight power loss.
+* **Production Robustness:** Implements crash-safe video recording (XVID codec with AVI format for append-friendly writes) and graceful error handling for hardware disconnections.
 ---
 
 ## 🚀 Startup Guide (Physical Test)
@@ -74,12 +84,4 @@ PX4 Parameters: In QGroundControl, we set MAV_1_CONFIG to Telem 2 and MAV_1_MODE
 Linux Permissions: We freed the /dev/ttyTHS1 port from system processes (like nvgetty) to allow your user to speak directly to the drone.
 
 4. `REAL_landing.py` (Hardware-Validated Autonomous Landing)
-The production-ready landing script that integrates all previous components into a fully autonomous landing system tested and validated on physical hardware.
-* **Multi-Rate Control Loop:** Runs at 100 Hz for smooth command generation to the flight controller, while the vision subsystem operates independently at 30 FPS via a separate camera thread.
-* **Advanced Kalman Filter:** Estimates drone position in pixel coordinates with Zero-Order Hold (ZOH) logic to gracefully handle frame drops and temporary target loss during fast descents.
-* **Robust Parallax Correction:** Dynamically compensates for camera offset relative to the drone's center of mass, ensuring pixel-to-meter conversion accuracy at all altitudes.
-* **Adaptive PID with Gain Scheduling:** Dynamically adjusts control gains based on altitude—aggressive far from ground, conservative near touchdown to prevent oscillations and overshooting.
-* **Intelligent Search Mode:** When target is lost for >1.5 seconds, the drone executes a square spiral search pattern while climbing to regain visual lock without crashing.
-* **Data Logging & Video Recording:** Continuous CSV logging of telemetry (position estimates, velocity commands, altitude, battery) and AVI video recording with periodic flushing to ensure data integrity even if the process crashes.
-* **Battery Monitoring:** Real-time battery level tracking with automatic emergency descent (<20% remaining) to prevent in-flight power loss.
-* **Production Robustness:** Implements crash-safe video recording (XVID codec with AVI format for append-friendly writes) and graceful error handling for hardware disconnections.
+Run the code.
