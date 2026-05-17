@@ -1,4 +1,4 @@
-# High-Precision Autonomous Landing System for UAVs
+# High-Precision Autonomous Landing System for UAVs 🚁
 
 This project implements a high-precision autonomous landing system for drones, based on computer vision (ArUco markers) and MAVLink protocol. The system is designed to operate on a Companion Computer (NVIDIA Jetson Nano) interfaced with a flight controller (Pixhawk) via serial telemetry and MAVSDK.
 
